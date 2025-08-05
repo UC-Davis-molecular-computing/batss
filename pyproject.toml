@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "batss"
-version = "1.0.1"
+version = "1.0.0"
 description = "A Python package with Rust backend for efficient simulation of chemical reaction networks using a batching algorithm."
 requires-python = ">=3.10"
 classifiers = [

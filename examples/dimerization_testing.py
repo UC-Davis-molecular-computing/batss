@@ -440,11 +440,11 @@ def plot_dimerization_crn(pop_exponent: int, seed: int, num_runs: int = 1) -> No
     alpha = 0.3
     for i, data in enumerate(datasets):
         if i == 0:
-            plt.plot(data.time, data.D, color='C0', label='$D$', alpha=1)
-            plt.plot(data.time, data.M, color='C1', label='$M$', alpha=1)
+            plt.plot(data.time, data.D, color='C1', label='$D$', alpha=1)
+            plt.plot(data.time, data.M, color='C0', label='$M$', alpha=1)
         else:
-            plt.plot(data.time, data.D, color='C0', alpha=alpha)
-            plt.plot(data.time, data.M, color='C1', alpha=alpha)
+            plt.plot(data.time, data.D, color='C1', alpha=alpha)
+            plt.plot(data.time, data.M, color='C0', alpha=alpha)
 
     # # Plot D counts - all same color (first default color), only label the first one
     # for i, data in enumerate(datasets):
@@ -467,18 +467,18 @@ def plot_dimerization_crn(pop_exponent: int, seed: int, num_runs: int = 1) -> No
     plt.show()
 
 def main():
-    pop_exponent = 8
+    pop_exponent = 2
     trials_exponent = 9
     final_time = 0.5
     species_name = 'D'
     seed = 1
-    num_runs = 1  # Number of simulation runs to plot
+    num_runs = 10  # Number of simulation runs to plot
     rebop_crn, rebop_inits = rebop_dimerization_with_inits(pop_exponent)
     ppsim_sim = ppsim_dimerization_crn(pop_exponent, seed)
 
-    plot_dimerization_crn_ppsim_with_null(pop_exponent, seed)
+    # plot_dimerization_crn_ppsim_with_null(pop_exponent, seed)
     
-    # plot_dimerization_crn(pop_exponent, seed, num_runs)
+    plot_dimerization_crn(pop_exponent, seed, num_runs)
     
     # ppsim_sim.run(final_time, 0.01) # type: ignore
     # print(f'done with ppsim')
