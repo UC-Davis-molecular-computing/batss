@@ -1,0 +1,79 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Rust src/main.rs",
+            "type": "lldb",
+            "request": "launch",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=main",
+                    "--package=ppsim"
+                ],
+                "filter": {
+                    "name": "main",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Python Debug examples/dimerization_testing.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/dimerization_testing.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug examples/oregonator_plotting.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/oregonator_plotting.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug examples/lotka_volterra_testing.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/lotka_volterra_testing.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug examples/lotka_volterra_plotting.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/lotka_volterra_plotting.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug examples/crn_script.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/crn_script.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug gamma.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "gamma.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug examples/test_sequential.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/test_sequential.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug examples/generate_sequential_samples.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/generate_sequential_samples.py",
+            "console": "integratedTerminal"
+        }
+    ]
+}

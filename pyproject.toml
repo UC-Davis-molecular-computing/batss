@@ -1,0 +1,46 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "ppsim"
+version = "1.0.1"
+description = "A Python package with Rust backend for efficient simulation of population protocols using the multibatching algorithm of Berenbrink et al."
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=2",
+    "jupyterlab>=4",
+    "matplotlib>=3",
+    "types-tqdm>=4",
+    "types-seaborn>=0.13",
+    "ipywidgets>=8",
+    "matplotlib>=3",
+    "seaborn>=0.13",
+    "pandas>=2",
+    "tqdm>=4",
+    "natsort>=8",
+    "gpac>=1",
+    "polars>=1",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "ppsim.ppsim_rust.ppsim_rust"
+include = ["ppsim/**/*.py", "ppsim/**/*.pyi", "ppsim/py.typed", "MANIFEST.in"]
+# Ignore CONDA_PREFIX environment variable to avoid conflicts with virtual environments
+ignore-conda-prefix = true
+
+[project.optional-dependencies]
+docs = [
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme",
+    "sphinx-autodoc-typehints",
+    "toml",
+]

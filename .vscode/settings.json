@@ -1,0 +1,54 @@
+{
+    "python.analysis.extraPaths": [
+        "./python",
+        "../gpac"
+    ],
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "python.terminal.activateEnvironment": false,
+    "terminal.integrated.env.windows": {
+        "CONDA_AUTO_ACTIVATE_BASE": "false"
+    },
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "icon": "terminal-powershell",
+            // Comment out custom profile to enable shell integration
+            "args": [
+                "-NoExit",
+                "-ExecutionPolicy", "Bypass",
+                "-NoLogo",
+                "-NoProfile",
+                "-File",
+                "${workspaceFolder}/.vscode/powershell/Microsoft.VSCode_profile.ps1"
+            ]
+            
+        },
+        "Command Prompt": {
+            "path": "cmd.exe",
+            "icon": "terminal-cmd"
+        }
+    },
+    "terminal.integrated.shellIntegration.enabled": true,
+    "terminal.integrated.shellIntegration.decorationsEnabled": "both",
+    "terminal.integrated.gpuAcceleration": "auto",
+    "terminal.integrated.persistentSessionReviveProcess": "never",
+    "terminal.integrated.enablePersistentSessions": false,
+    "terminal.integrated.environmentChangesIndicator": "on",
+    "rust-analyzer.cargo.extraEnv": {
+        "PYTHON_SYS_EXECUTABLE": "${workspaceFolder}/.venv/Scripts/python.exe",
+        "PYO3_PYTHON": "${workspaceFolder}/.venv/Scripts/python.exe",
+        "VIRTUAL_ENV": "${workspaceFolder}/.venv"
+    },
+    "rust-analyzer.server.extraEnv": {
+        "PYTHON_SYS_EXECUTABLE": "${workspaceFolder}/.venv/Scripts/python.exe",
+        "PYO3_PYTHON": "${workspaceFolder}/.venv/Scripts/python.exe",
+        "VIRTUAL_ENV": "${workspaceFolder}/.venv"
+    },
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+		"editor.tabSize": 4,
+		"editor.insertSpaces": true,
+		"editor.formatOnSave": true
+    },
+}
