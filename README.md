@@ -1,17 +1,17 @@
-# ppsim Python package
+# batss Python package
 
-The `ppsim` package is used for simulating population protocols. The package and further example notebooks can be found on [Github](https://github.com/UC-Davis-molecular-computing/ppsim-rust).
+The `batss` package is used for simulating population protocols. The package and further example notebooks can be found on [Github](https://github.com/UC-Davis-molecular-computing/batss).
 
 **NOTE:** The original version of ppsim (versions prior to 1.0.0) was implemented in Cython and hosted at a different repository: https://github.com/UC-Davis-molecular-computing/ppsim. The current version hosted at this repo has the time-critical parts of the algorithm implemented in Rust rather than Cython.
 
 If you find ppsim useful in a scientific project, please cite its associated paper:
 
-> <ins>ppsim: A software package for efficiently simulating and visualizing population protocols</ins>.  
-  David Doty and Eric Severson.  
-  CMSB 2021: *Proceedings of the 19th International Conference on Computational Methods in Systems Biology*  
-  [ [paper](http://arxiv.org/abs/2105.04702) | [BibTeX](https://web.cs.ucdavis.edu/~doty/papers/ppsim.bib) ]
+> <ins>Exactly simulating stochastic chemical reaction networks in sub-constant time per reaction</ins>.  
+  Joshua Petrack and David Doty.
+  preprint  
+  [ [paper](http://arxiv.org/abs/TODO) | [BibTeX](TODO) ]
 
-The core of the simulator uses a [batching algorithm](https://arxiv.org/abs/2005.03584) which gives significant asymptotic gains for protocols with relatively small reachable state sets. The package is designed to be run in a Python notebook, to concisely describe complex protocols, efficiently simulate their dynamics, and provide helpful visualization of the simulation.
+The core of the simulator uses a modification of a [batching algorithm](https://arxiv.org/abs/2005.03584) for population protocols (chemical reaction networks with exactly two reactants and two products per reaction) that gives significant asymptotic gains for protocols with relatively small reachable state sets. The package is designed to be run in a Python notebook, to concisely describe complex protocols, efficiently simulate their dynamics, and provide helpful visualization of the simulation.
 
 ## Table of contents
 
@@ -27,7 +27,7 @@ The package can be installed with `pip` via
 
 
 ```python
-pip install ppsim
+pip install batss
 ```
 
 ## First example protocol
@@ -36,7 +36,7 @@ The most important part of the package is the `Simulation` class, which is respo
 
 
 ```python
-from ppsim import Simulation
+from batss import Simulation
 ```
 
 A state can be any hashable Python object. The simplest way to describe a protocol is a dictionary mapping pairs of input states to pairs of output states.
@@ -238,7 +238,7 @@ A key result about this protocol is it converges in expected O(log n) time, whic
 
 
 ```python
-from ppsim import time_trials
+from batss import time_trials
 import numpy as np
 
 ns = [int(n) for n in np.geomspace(10, 10 ** 8, 20)]
@@ -1868,7 +1868,7 @@ bar = widgets.interact(plot_row,
 
 
 ```python
-from ppsim import species
+from batss import species
 
 a,b,c,d = species('A B C D')
 rxns = [

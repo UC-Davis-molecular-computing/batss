@@ -45,6 +45,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
+name = "batss"
+version = "1.0.1"
+dependencies = [
+ "compensated-summation",
+ "flame",
+ "itertools",
+ "lazy_static 1.5.0",
+ "nalgebra",
+ "ndarray",
+ "num-bigint",
+ "num-format",
+ "num-integer",
+ "numpy",
+ "pyo3",
+ "rand",
+ "rand_distr",
+ "rebop",
+ "serde_json",
+ "special",
+ "stybulate",
+ "tqdm",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -412,30 +436,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8a2f0d8d040d7848a709caf78912debcc3f33ee4b3cac47d73d1e1069e83507"
 dependencies = [
  "portable-atomic",
-]
-
-[[package]]
-name = "ppsim"
-version = "1.0.1"
-dependencies = [
- "compensated-summation",
- "flame",
- "itertools",
- "lazy_static 1.5.0",
- "nalgebra",
- "ndarray",
- "num-bigint",
- "num-format",
- "num-integer",
- "numpy",
- "pyo3",
- "rand",
- "rand_distr",
- "rebop",
- "serde_json",
- "special",
- "stybulate",
- "tqdm",
 ]
 
 [[package]]

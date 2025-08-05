@@ -16,7 +16,7 @@ use simulator_sequential::SimulatorSequentialArray;
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn ppsim_rust(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn batss_rust(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Simulator>()?;
     m.add_class::<SimulatorSequentialArray>()?;
     m.add_class::<SimulatorMultiBatch>()?;

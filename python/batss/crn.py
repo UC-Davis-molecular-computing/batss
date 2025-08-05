@@ -16,12 +16,12 @@ The general syntax is
     init_config = {a: 0.51 * n, b: 0.49 * n}
     sim = Simulation(init_config=init_config, rule=approx_majority)
 
-In other words, a list of reactions is treated by the ppsim library just like the other ways of specifying
+In other words, a list of reactions is treated by the batss library just like the other ways of specifying
 population protocol transitions (the `rule` parameter in the constructor for 
-:class:`ppsim.simulation.Simulation`, which also
+:class:`batss.simulation.Simulation`, which also
 accepts a dict or a Python function).
 
-More examples given in https://github.com/UC-Davis-molecular-computing/ppsim/tree/main/examples
+More examples given in https://github.com/UC-Davis-molecular-computing/batss/tree/main/examples
 """
 
 from __future__ import annotations  # needed for forward references in type hints

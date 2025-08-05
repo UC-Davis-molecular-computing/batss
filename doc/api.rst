@@ -1,7 +1,7 @@
 API Reference
 =============
 
-.. automodule:: ppsim
+.. automodule:: batss
    :members:
    :undoc-members:
    :show-inheritance:
@@ -12,17 +12,17 @@ Module Documentation
 .. toctree::
    :maxdepth: 2
 
-.. automodule:: ppsim.simulation
+.. automodule:: batss.simulation
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: ppsim.crn
+.. automodule:: batss.crn
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: ppsim.snapshot
+.. automodule:: batss.snapshot
    :members:
    :undoc-members:
    :show-inheritance:

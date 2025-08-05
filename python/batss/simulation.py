@@ -38,9 +38,9 @@ import numpy.typing as npt
 import pandas as pd
 from tqdm.auto import tqdm
 
-from ppsim.crn import Reaction, reactions_to_dict, CRN, convert_to_uniform, catalyst_specie, waste_specie, extra_species
-from ppsim.snapshot import Snapshot, TimeUpdate
-from ppsim.ppsim_rust import Simulator, SimulatorSequentialArray, SimulatorMultiBatch, SimulatorCRNMultiBatch
+from batss.crn import Reaction, reactions_to_dict, CRN, convert_to_uniform, catalyst_specie, waste_specie, extra_species
+from batss.snapshot import Snapshot, TimeUpdate
+from batss.batss_rust import Simulator, SimulatorSequentialArray, SimulatorMultiBatch, SimulatorCRNMultiBatch
 
 # TODO: these names are not showing up in the mouseover information
 State: TypeAlias = Hashable
@@ -236,18 +236,18 @@ class Simulation:
             simulator_method: Which Simulator method to use, either ``'MultiBatch'``
                 or ``'Sequential'`` or ``'Gillespie'`` or ``'CRN'``.
                 - ``'MultiBatch'``:
-                    :class:`ppsim_rust.SimulatorMultiBatch` does O(sqrt(n)) interaction steps in parallel
+                    :class:`batss_rust.SimulatorMultiBatch` does O(sqrt(n)) interaction steps in parallel
                     using batching, and is much faster for large population sizes and
                     relatively small state sets.
                 - ``'Gillespie'``:
                     uncondtionally uses the Gillespie algorithm. Still uses the multibatch 
                     simulator, but instructs it to always use the Gillespie algorithm.
                 - ``'Sequential'``:
-                    :class:`ppsim_rust.SimulatorSequentialArray` represents the population as an array of
+                    :class:`batss_rust.SimulatorSequentialArray` represents the population as an array of
                     agents, and simulates each interaction step by choosing a pair of agents
                     to update. Defaults to 'MultiBatch'.
                 - ``'CRN'``:
-                    :class:`ppsim_rust.SimulatorCRNMultiBatch` does parallel batching for arbitrary
+                    :class:`batss_rust.SimulatorCRNMultiBatch` does parallel batching for arbitrary
                     CRNs, and should be faster than Gillespie on large population sizes and
                     small species sets.
             

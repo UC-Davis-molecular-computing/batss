@@ -13,7 +13,7 @@ version = pyproject_data["project"]["version"]
 release = version
 
 # Project information
-project = 'ppsim'
+project = 'batss'
 copyright = '2025, David Doty, Joshua Petrack, and Eric Severson'
 author = 'David Doty, Joshua Petrack, and Eric Severson'
 
@@ -56,8 +56,8 @@ autosummary_generate = True
 #     ('py:class', 'Returns'),
 #     ('py:data', 'Snapshot.simulation.state_list'),
 #     ('py:meth', 'Simulation.add_snapshot'),
-#     ('py:class', 'ppsim_rust.SimulatorMultiBatch'),
-#     ('py:class', 'ppsim_rust.SimulatorSequentialArray'),
+#     ('py:class', 'batss_rust.SimulatorMultiBatch'),
+#     ('py:class', 'batss_rust.SimulatorSequentialArray'),
 #     ('py:class', 'SimulatorMultiBatch'),
 #     ('py:class', 'SimulatorSequentialArray'),
 #     ('py:class', 'Snapshot'),

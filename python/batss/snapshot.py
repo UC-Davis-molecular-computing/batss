@@ -3,7 +3,7 @@ A module for :class:`Snapshot` objects used to visualize the protocol during or 
 the simulation has run.
 
 
-:class:`Snapshot` is a base class for snapshot objects that get are updated by :class:`ppsim.simulation.Simulation`.
+:class:`Snapshot` is a base class for snapshot objects that get are updated by :class:`batss.simulation.Simulation`.
 
 :class:`Plotter` is a subclass of :class:`Snapshot` that creates a matplotlib figure and axis.
 It also gives the option for a state_map function which maps states to the categories which
@@ -19,7 +19,7 @@ in categories over time.
 from typing import Callable, Hashable, Any, TYPE_CHECKING, Optional, ForwardRef
 
 if TYPE_CHECKING:
-    from ppsim.simulation import Simulation
+    from batss.simulation import Simulation
     from matplotlib.figure import Figure
     from matplotlib.axes import Axes
 

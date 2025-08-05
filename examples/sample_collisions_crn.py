@@ -1,6 +1,6 @@
 import math
 import numpy as np
-import ppsim as pp
+import batss as pp
 import random
 from tqdm import tqdm
 

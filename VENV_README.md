@@ -1,6 +1,6 @@
-# Virtual Environment Setup for ppsim
+# Virtual Environment Setup for batss
 
-This document provides instructions for setting up and using a virtual environment for the ppsim package.
+This document provides instructions for setting up and using a virtual environment for the batss package.
 
 ## Setup Instructions
 
@@ -48,7 +48,7 @@ pip install -e .
 pip install ipykernel
 
 # Register the virtual environment as a Jupyter kernel
-python -m ipykernel install --user --name=ppsim-venv --display-name="Python (ppsim-venv)"
+python -m ipykernel install --user --name=batss-venv --display-name="Python (batss-venv)"
 ```
 
 ## Usage
@@ -73,7 +73,7 @@ Or directly:
 
 ### Using Jupyter Notebooks
 
-When opening a Jupyter notebook, select the "Python (ppsim-venv)" kernel from the kernel dropdown menu.
+When opening a Jupyter notebook, select the "Python (batss-venv)" kernel from the kernel dropdown menu.
 
 ## Troubleshooting
 
@@ -93,7 +93,7 @@ $env:CONDA_PREFIX = $null
 
 ### Import Errors
 
-If you encounter import errors when trying to use the ppsim package, make sure:
+If you encounter import errors when trying to use the batss package, make sure:
 
 1. The virtual environment is activated
 2. The package is installed in development mode (`pip install -e .`)
@@ -101,6 +101,6 @@ If you encounter import errors when trying to use the ppsim package, make sure:
 
 ## Notes
 
-- The virtual environment isolates the ppsim package and its dependencies from your global Python installation
+- The virtual environment isolates the batss package and its dependencies from your global Python installation
 - The development mode installation (`pip install -e .`) allows you to make changes to the Python code without reinstalling
 - When you make changes to the Rust code, you need to rebuild the extension with `maturin develop`

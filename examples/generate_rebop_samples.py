@@ -12,7 +12,7 @@ if False:
         @classmethod
         def find_spec(cls, fullname, path=None, target=None):
             # Only handle the specific module we want to redirect
-            if fullname == "ppsim.ppsim_rust.ppsim_rust":
+            if fullname == "batss.batss_rust.batss_rust":
                 return importlib.util.spec_from_file_location(fullname, str(custom_pyd_path))
             return None
 
@@ -21,7 +21,7 @@ if False:
 
 
 
-import ppsim as pp
+import batss as pp
 import numpy as np
 import gpac as gp
 import polars as pl

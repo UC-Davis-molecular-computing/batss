@@ -1,7 +1,7 @@
 import polars as pl
 import numpy as np
 from matplotlib import pyplot as plt
-import ppsim as pp
+import batss as pp
 
 
 def main3():

@@ -1,11 +1,11 @@
 """
-ppsim: A Python package with Rust backend for simulation
+batss: A Python package with Rust backend for simulation of chemical reaction networks through a fast batchign algorithm.
 """
 
 # Re-export everything from Python modules
-from ppsim.simulation import *
-from ppsim.snapshot import *
-from ppsim.crn import *
+from batss.simulation import *
+from batss.snapshot import *
+from batss.crn import *
 
 import numpy as np
 import numpy.typing as npt

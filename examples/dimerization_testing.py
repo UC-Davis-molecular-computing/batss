@@ -25,14 +25,14 @@ if False:
         @classmethod
         def find_spec(cls, fullname, path=None, target=None):
             # Only handle the specific module we want to redirect
-            if fullname == "ppsim.ppsim_rust.ppsim_rust":
+            if fullname == "batss.batss_rust.batss_rust":
                 return importlib.util.spec_from_file_location(fullname, str(custom_pyd_path))
             return None
 
     # Register our custom finder at the beginning of the meta_path
     sys.meta_path.insert(0, CustomPydFinder)
 
-import ppsim as pp
+import batss as pp
 
 def measure_time(fn, trials=1) -> float:
     """
