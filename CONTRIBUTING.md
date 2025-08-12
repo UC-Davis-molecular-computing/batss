@@ -9,7 +9,7 @@ Deploying to the [PyPI website](https://pypi.org/project/batss/) is how users ar
 
 2. Commit this and other changes to the main branch and push to github.
 
-3. On the [Github page](https://github.com/UC-Davis-molecular-computing/batss), click on Releases-->Create a new release. Title the release `v1.0.1`. This can actually be anything but that is a good title. More importantly, press `Tag: Select tag` and type `v1.0.1`; this must be exactly that, i.e., it must be the lowercase letter `v` followed by the version number in pyproject.toml. Importantly, there must be no tag already called `v1.0.1`; to double-check, click on Tags at the top of the releases page to see existing tags. If that tag exists, delete it. 
+3. On the [Github page](https://github.com/UC-Davis-molecular-computing/batss), click on Releases-->Create a new release. Title the release `v1.0.1` (or whatever is the version number). This can actually be anything but that is a good title. More importantly, press `Tag: Select tag` and type `v1.0.1`; this must be exactly that, i.e., it must be the lowercase letter `v` followed by the version number in pyproject.toml. Press Enter (i.e., don't just click outside once you've typed; you have to press Enter for it to create the tag). Importantly, there must be no tag already called `v1.0.1`; to double-check, click on Tags at the top of the releases page to see existing tags. If that tag exists, delete it. 
 
 4. Click Publish release.
 
