@@ -12,16 +12,22 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "main"
 path = "src/main.rs"
+required-features = ["rebop-dep"]
 
 [[bin]]
 name = "rebop"
 path = "src/generate_rebop_samples.rs"
+required-features = ["rebop-dep"]
+
 [[bin]]
 name = "time_rebop"
 path = "src/rebop_runtime_sampling.rs"
+required-features = ["rebop-dep"]
 
 [features]
+default = ["rebop-dep"]
 flm = ["flame"]  # Enable flame profiling to be switched on/off
+rebop-dep = ["rebop"]  # Make rebop optional to fix macOS builds
 
 
 [dependencies]
@@ -42,6 +48,6 @@ lazy_static = "1"
 stybulate = "1"
 itertools = "0.14.0"
 compensated-summation = "0.3.1"
-rebop = "0.9"
+rebop = { version = "0.9", optional = true }
 serde_json = "1.0"
 tqdm = "0.8"
