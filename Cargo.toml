@@ -2,7 +2,7 @@
 name = "batss"
 # supposedly maturin uses the version from pyproject.toml when publishing to PyPi, 
 # so it should not matter what this is, but I try to remember to keep it in sync.
-version = "1.0.1"
+version = "1.0.0"
 edition = "2021"
 
 [lib]
