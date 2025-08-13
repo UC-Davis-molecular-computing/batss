@@ -9,7 +9,7 @@ type State = usize;
 
 /// Samples a discrete uniform random number in the range [low, high].
 /// Note inclusive on both ends
-pub fn sample_discrete_uniform(rng: &mut SmallRng, low: usize, high: usize) -> usize {
+pub fn sample_discrete_uniform(rng: &mut SmallRng, low: u64, high: u64) -> u64 {
     // <DiscreteUniform as rand::distributions::Distribution<i64>>::sample(&discrete_uniform, rng)
     //     as usize
     rng.random_range(low..=high)
@@ -17,15 +17,15 @@ pub fn sample_discrete_uniform(rng: &mut SmallRng, low: usize, high: usize) -> u
 
 /// Data structure for a multiset that supports fast random sampling.
 pub struct Urn {
-    pub config: Vec<usize>,
-    pub order: Vec<usize>,
-    pub size: usize,
+    pub config: Vec<u64>,
+    pub order: Vec<State>,
+    pub size: u64,
     rng: SmallRng,
 }
 
 impl Urn {
     /// Create a new Urn object.
-    pub fn new(config: Vec<State>, seed: Option<u64>) -> Self {
+    pub fn new(config: Vec<u64>, seed: Option<u64>) -> Self {
         let size = config.iter().sum();
         let order = (0..config.len()).collect();
         let rng = if let Some(s) = seed {
@@ -100,9 +100,9 @@ impl Urn {
     /// Adds one element at index.
     pub fn add_to_entry(&mut self, index: usize, amount: i64) {
         assert!(self.config[index] as i64 + amount >= 0);
-        self.config[index] = (self.config[index] as i64 + amount) as State;
+        self.config[index] = (self.config[index] as i64 + amount) as u64;
         assert!(self.size as i64 + amount >= 0);
-        self.size = (self.size as i64 + amount) as usize;
+        self.size = (self.size as i64 + amount) as u64;
     }
 
     /// Samples n elements, writing them into the vector v.
@@ -119,10 +119,10 @@ impl Urn {
     ///     idx_nx: the index (into self.order) of the last nonzero entry
     ///         v[self.order[i]] for i in range(nz) can then skip looping over
     ///         any entries after the last nonzero entry.
-    pub fn sample_vector(&mut self, n: usize, v: &mut [State]) -> Result<usize, String> {
+    pub fn sample_vector(&mut self, n: u64, v: &mut [u64]) -> Result<usize, String> {
         let mut n = n;
         let mut i: usize = 0;
-        let mut total: usize = self.size;
+        let mut total: u64 = self.size;
         for j in 0..v.len() {
             v[j] = 0;
         }
@@ -157,7 +157,7 @@ impl Urn {
     }
 
     /// Adds a vector of elements to the urn.
-    pub fn add_vector(&mut self, vector: &Vec<State>) {
+    pub fn add_vector(&mut self, vector: &Vec<u64>) {
         for i in 0..self.config.len() {
             let count = vector[i];
             self.config[i] += count;
@@ -177,7 +177,7 @@ impl Urn {
     /// the current config with the new one. This is useful because
     /// we can save the RNG. Otherwise we would have to create a
     /// new Urn with the same RNG and this avoid borrowship issues.
-    pub fn reset_config(&mut self, config: &Vec<State>) {
+    pub fn reset_config(&mut self, config: &Vec<u64>) {
         for i in 0..self.config.len() {
             self.config[i] = config[i];
         }

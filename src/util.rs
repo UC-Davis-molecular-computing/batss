@@ -8,7 +8,7 @@ use rand_distr::{Distribution, Hypergeometric, StandardUniform};
 #[allow(unused_imports)]
 use crate::flame;
 
-pub fn binomial_as_f64(n: usize, k: usize) -> f64 {
+pub fn binomial_as_f64(n: u64, k: u64) -> f64 {
     // We're hand-implementing this as a loop because statrs's algorithm winds up with floating
     // point errors and naive algorithms that multiply ints will overflow. And k is going to
     // be the order of the CRN, so it's very few iterations.
@@ -25,22 +25,17 @@ pub fn ln_gamma(x: f64) -> f64 {
     ln_gamma_special(x)
 }
 
-pub fn ln_factorial(x: usize) -> f64 {
+pub fn ln_factorial(x: u64) -> f64 {
     // println!("non ue version called");
-    ln_factorial_manual(x as u64)
+    ln_factorial_manual(x)
 }
 
-pub fn hypergeometric_sample(
-    popsize: usize,
-    good: usize,
-    draws: usize,
-    rng: &mut SmallRng,
-) -> usize {
+pub fn hypergeometric_sample(popsize: u64, good: u64, draws: u64, rng: &mut SmallRng) -> u64 {
     // println!("hypergeometric_sample_manual");
     hypergeometric_sample_manual(popsize, good, draws, rng)
 }
 
-pub fn multinomial_sample(n: usize, pix: &Vec<f64>, result: &mut [usize], rng: &mut SmallRng) {
+pub fn multinomial_sample(n: u64, pix: &Vec<f64>, result: &mut [u64], rng: &mut SmallRng) {
     multinomial_sample_manual(n, pix, result, rng);
 }
 
@@ -366,7 +361,7 @@ const SQRT2: f128 = 1.41421356237309504880168872420977;
 
 // f128 natural log. Mostly copied from https://github.com/rust-lang/libm/blob/master/libm/src/math/log.rs
 pub fn ln_f128(x: f128) -> f128 {
-    let print: bool = x == 156951994071usize as f128;
+    let print: bool = x == 156951994071_u64 as f128;
     // flame::start("Part 1");
     // assert!(x >= 1.0, "ln_f128 assumes its input is at least 1.");
     // Get the exponent from the f128. It has one sign bit followed by 15 exponent bits.
@@ -558,11 +553,11 @@ pub fn hypergeometric_sample_statrs(
 // adapted from numpy's implementation of the hypergeometric distribution (as of April 2025)
 // https://github.com/numpy/numpy/blob/b76bb2329032809229e8a531ba3179c34b0a3f0a/numpy/random/src/distributions/random_hypergeometric.c#L246
 pub fn hypergeometric_sample_manual(
-    popsize: usize,
-    good: usize,
-    draws: usize,
+    popsize: u64,
+    good: u64,
+    draws: u64,
     rng: &mut SmallRng,
-) -> usize {
+) -> u64 {
     if good > popsize {
         panic!("good must be less than or equal to popsize");
     }
@@ -576,12 +571,7 @@ pub fn hypergeometric_sample_manual(
     }
 }
 
-fn hypergeometric_sample_naive(
-    popsize: usize,
-    good: usize,
-    draws: usize,
-    rng: &mut SmallRng,
-) -> usize {
+fn hypergeometric_sample_naive(popsize: u64, good: u64, draws: u64, rng: &mut SmallRng) -> u64 {
     // This is the simpler naive implementation for small samples.
     // https://github.com/numpy/numpy/blob/b76bb2329032809229e8a531ba3179c34b0a3f0a/numpy/random/src/distributions/random_hypergeometric.c#L46
     // variable name translations from numpy source code:
@@ -621,12 +611,7 @@ fn hypergeometric_sample_naive(
 // https://github.com/numpy/numpy/blob/b76bb2329032809229e8a531ba3179c34b0a3f0a/numpy/random/src/distributions/random_hypergeometric.c#L119
 const D1: f64 = 1.7155277699214135; // 2*sqrt(2/e)
 const D2: f64 = 0.8989161620588988; // 3 - 2*sqrt(3/e)
-pub fn hypergeometric_sample_hrua(
-    popsize: usize,
-    good: usize,
-    sample: usize,
-    rng: &mut SmallRng,
-) -> usize {
+pub fn hypergeometric_sample_hrua(popsize: u64, good: u64, sample: u64, rng: &mut SmallRng) -> u64 {
     let bad = popsize - good;
     let computed_sample = sample.min(popsize - sample);
     let mingoodbad = good.min(bad);
@@ -660,8 +645,7 @@ pub fn hypergeometric_sample_hrua(
      */
     let h = D1 * c + D2;
 
-    let m =
-        ((computed_sample + 1) as f64 * (mingoodbad + 1) as f64 / (popsize + 2) as f64) as usize;
+    let m = ((computed_sample + 1) as f64 * (mingoodbad + 1) as f64 / (popsize + 2) as f64) as u64;
 
     let g = ln_factorial(m)
         + ln_factorial(mingoodbad - m)
@@ -681,9 +665,9 @@ pub fn hypergeometric_sample_hrua(
      *  but there is no documented justification for this value.  A lower value
      *  might work just as well, but I've kept the value 16 here.
      */
-    let b = (computed_sample.min(mingoodbad) + 1).min((a + 16.0 * c).floor() as usize);
+    let b = (computed_sample.min(mingoodbad) + 1).min((a + 16.0 * c).floor() as u64);
 
-    let mut k: usize;
+    let mut k: u64;
     loop {
         let u = rng.random::<f64>();
         let v = rng.random::<f64>(); // "U star" in Stadlober (1989)
@@ -694,7 +678,7 @@ pub fn hypergeometric_sample_hrua(
             continue;
         }
 
-        k = x.floor() as usize;
+        k = x.floor() as u64;
 
         let gp = ln_factorial(k)
             + ln_factorial(mingoodbad - k)
@@ -734,13 +718,13 @@ pub fn hypergeometric_sample_hrua(
 // multinomial_sample
 
 const SMALL_EXPECTED_FAILURE_THRESHOLD: f64 = 1.0 / 1_000.0;
-pub fn binomial_sample(n: usize, p: f64, mut rng: &mut SmallRng) -> usize {
+pub fn binomial_sample(n: u64, p: f64, mut rng: &mut SmallRng) -> u64 {
     // let n: usize = 2517438726;
     // let p = 0.9999999999999994;
     // TODO: this is a terrible, terrible hack, to get around a bug in rand_distr::Binomial
     // that happens when called with the above n and p.
     let expected_failures = n as f64 * (1.0 - p);
-    if expected_failures < SMALL_EXPECTED_FAILURE_THRESHOLD && n > core::i32::MAX as usize {
+    if expected_failures < SMALL_EXPECTED_FAILURE_THRESHOLD && n > core::i32::MAX as u64 {
         let mut out = n;
         while out > 0 {
             let val: f64 = rng.sample(StandardUniform);
@@ -754,17 +738,12 @@ pub fn binomial_sample(n: usize, p: f64, mut rng: &mut SmallRng) -> usize {
     }
     let binomial_distribution = rand_distr::Binomial::new(n as u64, p).unwrap();
     let sample = binomial_distribution.sample(&mut rng);
-    sample as usize
+    sample
 }
 
 // port of numpy's multinomial sample to Rust, using rand_distr::Binomial as the underlying binomial sampler
 // https://github.com/numpy/numpy/blob/4961a1414bba2222016f29a03dcf75e6034a13f7/numpy/random/src/distributions/distributions.c#L1726
-pub fn multinomial_sample_manual(
-    n: usize,
-    pix: &Vec<f64>,
-    result: &mut [usize],
-    rng: &mut SmallRng,
-) {
+pub fn multinomial_sample_manual(n: u64, pix: &Vec<f64>, result: &mut [u64], rng: &mut SmallRng) {
     assert_eq!(
         pix.len(),
         result.len(),
@@ -776,7 +755,7 @@ pub fn multinomial_sample_manual(
     // Original Cython implementation zeroed out the result array initially, but
     // since we are overwriting the array, we only zero out the entries if we break out of the loop early.
     for j in 0..(d - 1) {
-        result[j] = binomial_sample(dn as usize, pix[j] / remaining_p, rng);
+        result[j] = binomial_sample(dn, pix[j] / remaining_p, rng);
         dn -= result[j];
         if dn <= 0 {
             // erase old values in remainder of result array
@@ -787,7 +766,7 @@ pub fn multinomial_sample_manual(
         }
         remaining_p -= pix[j];
     }
-    result[d - 1] = dn as usize;
+    result[d - 1] = dn;
 }
 
 pub fn f128_to_decimal(x: f128) -> String {

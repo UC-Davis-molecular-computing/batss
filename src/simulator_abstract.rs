@@ -10,10 +10,10 @@ type State = usize;
 pub struct Simulator {
     /// The population size (sum of values in urn.config).
     #[pyo3(get, set)]
-    pub n: usize,
+    pub n: u64,
     /// The current number of elapsed interaction steps.
     #[pyo3(get, set)]
-    pub t: usize,
+    pub t: u64,
     /// A q x q array of pairs (c,d) representing the transition function.
     /// delta[a][b] gives contains the two output states for a
     /// deterministic transition a,b --> c,d.
@@ -41,7 +41,7 @@ impl Simulator {
     /// Run the simulation for a specified number of steps or until max time is reached.
     #[allow(unused_variables)]
     #[pyo3(signature = (t_max, max_wallclock_time=3600.0))]
-    pub fn run(&mut self, t_max: usize, max_wallclock_time: f64) -> PyResult<()> {
+    pub fn run(&mut self, t_max: u64, max_wallclock_time: f64) -> PyResult<()> {
         unimplemented!()
     }
 
@@ -58,7 +58,7 @@ impl Simulator {
     ///     t: The new value of :any:`t`. Defaults to 0.
     #[pyo3(signature = (config, t=0))]
     #[allow(unused_variables)]
-    pub fn reset(&mut self, config: PyReadonlyArray1<State>, t: usize) -> PyResult<()> {
+    pub fn reset(&mut self, config: PyReadonlyArray1<State>, t: u64) -> PyResult<()> {
         unimplemented!()
     }
 }
