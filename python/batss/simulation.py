@@ -40,7 +40,7 @@ from tqdm.auto import tqdm
 
 from batss.crn import Reaction, reactions_to_dict, CRN, convert_to_uniform, catalyst_specie, waste_specie, extra_species
 from batss.snapshot import Snapshot, TimeUpdate
-from batss.batss_rust import Simulator, SimulatorSequentialArray, SimulatorMultiBatch, SimulatorCRNMultiBatch
+from batss.batss_rust import Simulator, SimulatorCRNMultiBatch
 
 # TODO: these names are not showing up in the mouseover information
 State: TypeAlias = Hashable
@@ -114,9 +114,7 @@ class Simulation:
     """
 
     simulator: Simulator
-    """An internal Simulator that performs the simulation steps.
-    
-    This is either a SimulatorMultiBatch or SimulatorSequentialArray instance."""
+    """An internal Simulator that performs the simulation steps. We probably want to ditch this since we only have one simulator now."""
 
     configs: list[npt.NDArray[np.uint]]
     """
@@ -195,7 +193,7 @@ class Simulation:
     The optional integer seed used for rng and inside Rust code.
     """
 
-    _method: type[SimulatorMultiBatch] | type[SimulatorSequentialArray] | type[SimulatorCRNMultiBatch]
+    _method: type[SimulatorCRNMultiBatch]
 
     simulator_method: str
 
@@ -206,7 +204,7 @@ class Simulation:
             init_config: dict[StateTypeVar, int], 
             rule: Rule, 
             *,
-            simulator_method: str = "MultiBatch",
+            simulator_method: str = "crn",
             transition_order: str = "symmetric", 
             seed: int | None = None,
             volume: float | None = None, 
@@ -383,14 +381,10 @@ class Simulation:
             self.state_list = natsorted(state_list, key=lambda x: repr(x)) + extra_species()
             self.state_dict = {state: i for i, state in enumerate(self.state_list)}
 
-        if simulator_method.lower() in ('multibatch', 'gillespie'):
-            self._method = SimulatorMultiBatch
-        elif simulator_method.lower() == 'sequential':
-            self._method = SimulatorSequentialArray
-        elif simulator_method.lower() == 'crn':
+        if simulator_method.lower() == 'crn':
             self._method = SimulatorCRNMultiBatch
         else:
-            raise ValueError('simulator_method must be multibatch, sequential, crn, or gillespie.')
+            raise ValueError('simulator_method must be crn.')
         self._transition_order = transition_order
         self.initialize_simulator(self.array_from_dict(init_config))
 
@@ -600,9 +594,6 @@ class Simulation:
         end_time = None
         # stop_condition() returns True when it is time to stop
         if run_until is None:
-            if not isinstance(self.simulator, SimulatorMultiBatch):
-                raise ValueError('Running until silence only works with multibatch simulator.')
-
             def stop_condition():
                 return self.simulator.silent
         elif isinstance(run_until, (float, int)):
@@ -710,8 +701,6 @@ class Simulation:
         Each reaction is separated by newlines, so that ``print(self.reactions)`` will display all reactions.
         Only works with simulator method multibatch, otherwise will raise a ValueError.
         """
-        if type(self.simulator) != SimulatorMultiBatch:
-            raise ValueError('reactions must be defined by multibatch simulator.')
         w = max([len(str(state)) for state in self.state_list])
         reactions = [self._reaction_string(r, p, w) for (r, p) in
                      zip(self.simulator.reactions, self.simulator.reaction_probabilities)]
@@ -726,8 +715,6 @@ class Simulation:
         Each reaction is separated by newlines, so that ``print(self.enabled_reactions)``
         will display all enabled reactions.
         """
-        if type(self.simulator) != SimulatorMultiBatch:
-            raise ValueError('reactions must be defined by multibatch simulator.')
         w = max([len(str(state)) for state in self.state_list])
         self.simulator.get_enabled_reactions()
 
@@ -839,8 +826,6 @@ class Simulation:
     @property
     def null_probability(self) -> float:
         """The probability the next interaction is null."""
-        if type(self.simulator) != SimulatorMultiBatch:
-            raise ValueError('null probability requires by multibatch simulator.')
         self.simulator.get_enabled_reactions()
         n = self.simulator.n
         return 1 - self.simulator.get_total_propensity() / (n * (n - 1) / 2)
@@ -924,8 +909,6 @@ class Simulation:
 
     def sample_silence_time(self) -> float:
         """Starts a new trial from the initial distribution and return time until silence."""
-        if not isinstance(self.simulator, SimulatorMultiBatch):
-            raise ValueError('silence time can only be found by multibatch simulator.')
         self.simulator.run_until_silent()
         return self.time
 

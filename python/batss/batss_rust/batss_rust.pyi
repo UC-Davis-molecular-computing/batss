@@ -91,57 +91,6 @@ class Simulator(ABC):
         ...
 
 
-class SimulatorSequentialArray(Simulator):
-    """
-    Simulator for population protocols using an array to store individual agent states, 
-    and sampling them two at a time to interact using the straightforward sequential
-    simulation method.
-    """
-
-    population: list[RustState]
-    """TODO"""
-
-
-
-
-class SimulatorMultiBatch(Simulator):
-    """
-    Simulator for population protocols using the MultiBatch algorithm described in 
-    this paper: 
-    
-    Petra Berenbrink, David Hammer, Dominik Kaaser, Ulrich Meyer, Manuel Penschuck, and Hung Tran. 
-    Simulating Population Protocols in Sub-Constant Time per Interaction. 
-    In 28th Annual European Symposium on Algorithms (ESA 2020). 
-    Volume 173, pp. 16:1-16:22, 2020.
-    
-    - https://arxiv.org/abs/2005.03584 
-    - https://doi.org/10.4230/LIPIcs.ESA.2020.16
-    """
-
-    do_gillespie: bool
-    """TODO"""
-
-    reactions: list[list[RustState]]
-    """TODO"""
-
-    enabled_reactions: list[int]
-    """TODO"""
-    
-    num_enabled_reactions: int
-    """TODO"""
-
-    reaction_probabilities: list[float]
-    """TODO"""
-
-    def get_enabled_reactions(self) -> None:
-        """TODO"""
-        ...
-
-    def get_total_propensity(self) -> float:
-        """TODO"""
-        ...
-
-
 class SimulatorCRNMultiBatch(Simulator):
     """
     Simulator for CRNs using TODO cite paper once citeable.

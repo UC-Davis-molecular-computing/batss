@@ -120,7 +120,7 @@ def make_and_save_plot(pop_exponent: int) -> None:
     formatter.set_powerlimits((0, 0))  # Always use scientific notation
     ax.yaxis.set_major_formatter(formatter)
 
-    plt.savefig(f'data/lotka_volterra_counts_time20_n1e{pop_exponent}.pdf', bbox_inches='tight')
+    # plt.savefig(f'data/lotka_volterra_counts_time20_n1e{pop_exponent}.pdf', bbox_inches='tight')
     plt.show()
 
     # make separate file for legend to share among all 4 subplots
@@ -191,7 +191,7 @@ def plot_null_reactions(pop_exponent: int, seed: int) -> None:
     plt.show()
 
 if __name__ == "__main__":
-    # main()
-    pop_exponent = 8
-    seed = 1
-    plot_null_reactions(pop_exponent, seed)
+    main()
+    # pop_exponent = 8
+    # seed = 1
+    # plot_null_reactions(pop_exponent, seed)
