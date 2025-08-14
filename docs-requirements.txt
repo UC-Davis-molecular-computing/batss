@@ -3,5 +3,9 @@ sphinx>=7.0.0
 sphinx-rtd-theme
 sphinx-autodoc-typehints
 toml
+# Runtime dependencies needed for imports
 numpy>=2
 typing-extensions
+gpac>=1
+natsort>=8
+tqdm>=4
