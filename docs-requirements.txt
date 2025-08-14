@@ -1,5 +1,10 @@
-# Ultra-minimal docs requirements
+# Balanced docs requirements - includes essential runtime deps
 sphinx>=7.0.0
 sphinx-rtd-theme
 sphinx-autodoc-typehints
 toml
+# Essential for autodoc to work
+numpy>=2
+natsort>=8
+tqdm>=4
+# Skip the heaviest: gpac (brings scipy, pandas, matplotlib)

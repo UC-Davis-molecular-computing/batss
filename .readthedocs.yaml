@@ -19,5 +19,5 @@ build:
          - echo "=== Creating virtual environment ==="
          - uv venv "${READTHEDOCS_VIRTUALENV_PATH}"
       install:
-         - echo "=== Installing minimal docs dependencies ==="
+         - echo "=== Installing docs dependencies ==="
          - uv pip install -r docs-requirements.txt

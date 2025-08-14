@@ -33,8 +33,12 @@ Example:
         sim.history.plot()
 """
 
-from importlib.metadata import version
-__version__ = version("batss")
+try:
+    from importlib.metadata import version
+    __version__ = version("batss")
+except Exception:
+    # Fallback for docs builds where package isn't installed
+    __version__ = "1.0.1"
 
 # Import order matters to avoid circular imports
 from batss.crn import *
