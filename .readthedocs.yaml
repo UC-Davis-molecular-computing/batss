@@ -11,22 +11,15 @@ build:
       python: "3.13"
    jobs:
       pre_create_environment:
-         - echo "Starting uv installation at $(date)"
+         - echo "=== Starting uv installation ==="
          - asdf plugin add uv
          - asdf install uv latest
          - asdf global uv latest
-         - echo "Completed uv installation at $(date)"
       create_environment:
-         - echo "Creating virtual environment at $(date)"
+         - echo "=== Creating virtual environment ==="
          - uv venv "${READTHEDOCS_VIRTUALENV_PATH}"
-         - echo "Completed virtual environment at $(date)"
       install:
-         - echo "Starting dependency installation at $(date)"
-         - time uv pip install -r docs-requirements.txt
-         - echo "Completed requirements install at $(date)"
-         - time uv pip install --no-deps .
-         - echo "Completed package install at $(date)"
-      post_build:
-         - echo "Build completed at $(date)"
-         - ls -la $READTHEDOCS_OUTPUT/html/
-         - echo "Total files generated: $(find $READTHEDOCS_OUTPUT/html/ -type f | wc -l)"
+         - echo "=== Installing dependencies ==="
+         - uv pip install -r docs-requirements.txt
+         - echo "=== Installing package ==="
+         - uv pip install --no-deps .

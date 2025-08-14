@@ -79,20 +79,5 @@ suppress_warnings = [
 intersphinx_timeout = 5  # Reduce timeout for external inventories
 autodoc_typehints = 'description'  # Faster than signature
 
-# Enable verbose output for debugging
-import logging
-logging.basicConfig(level=logging.INFO)
-
-# Keep autosummary files for debugging
-autosummary_generate_overwrite = False
-
-# Add timing information
-def setup(app):
-    import time
-    app._build_start_time = time.time()
-    
-    def on_build_finished(app, exception):
-        elapsed = time.time() - app._build_start_time
-        print(f"\n=== Build timing: {elapsed:.2f} seconds ===")
-    
-    app.connect('build-finished', on_build_finished)
+# Disable autosummary to speed up build
+autosummary_generate = False
