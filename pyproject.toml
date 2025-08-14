@@ -21,7 +21,6 @@ dependencies = [
     "types-tqdm>=4",
     "types-seaborn>=0.13",
     "ipywidgets>=8",
-    "matplotlib>=3",
     "seaborn>=0.13",
     "pandas>=2",
     "tqdm>=4",
