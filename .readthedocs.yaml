@@ -4,13 +4,13 @@ build:
   os: ubuntu-lts-latest
   tools:
     python: "3.13"
-
-python:
-  install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
+  jobs:
+    pre_install:
+      - pip install uv
+    post_checkout:
+      - uv sync --extra docs
+    post_install:
+      - uv run python -c "import batss; print('Package imported successfully')"
 
 sphinx:
   configuration: doc/conf.py
