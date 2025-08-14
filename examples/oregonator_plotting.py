@@ -1,6 +1,5 @@
 import sys
 import importlib.util
-import os
 from pathlib import Path
 
 if False:
@@ -24,10 +23,8 @@ if False:
 import batss as pp
 import numpy as np
 import gpac as gp
-import polars as pl
 from matplotlib import pyplot as plt
 import rebop as rb
-import timeit
 
 def main():
     crn = rb.Gillespie()

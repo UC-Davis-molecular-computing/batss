@@ -98,12 +98,12 @@ def main():
     ax.legend()
 
     ax.set_xlabel(f'count of state {state}')
-    ax.set_ylabel(f'empirical probability')
+    ax.set_ylabel('empirical probability')
     ax.set_title(f'multibatch vs {compare_to} state {state} distribution sampled at time {end_time} ($10^{trials_exponent}$ samples, n=$10^{pop_exponent}$)')
     
     # plt.ylim(0, 200_000)
 
-    pdf_fn = f'{dir}/multibatch_vs_{compare_to}_n10e{pop_exponent}_trials10e{trials_exponent}_bt-n-over-2_sample_coll-no-precompute.pdf'
+    # pdf_fn = f'{dir}/multibatch_vs_{compare_to}_n10e{pop_exponent}_trials10e{trials_exponent}_bt-n-over-2_sample_coll-no-precompute.pdf'
     # plt.savefig(pdf_fn, bbox_inches='tight')
     plt.show()
 

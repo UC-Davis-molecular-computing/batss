@@ -3,15 +3,15 @@ from __future__ import annotations
 import time
 import random
 import math
-from typing import Protocol, TypeVar, Callable, Iterable, Any, Generic, cast
+from typing import Protocol, TypeVar, Callable, Iterable, Generic, cast
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
 from abc import ABC, abstractmethod
 import threading
 
 # Generic type variables for input and output
-I = TypeVar("I", contravariant=True)
-O = TypeVar("O", covariant=True)
+InputType = TypeVar("InputType", contravariant=True)
+OutputType = TypeVar("OutputType", covariant=True)
 
 
 class SelectionStrategy(ABC):
@@ -149,7 +149,7 @@ class ThompsonSampling(SelectionStrategy):
         if all_recent_times:
             threshold = sorted(all_recent_times)[len(all_recent_times) // 2]
         else:
-            threshold = 1.0  # Default threshold
+            _ = 1.0  # Default threshold (not used)
 
         for stat in selector.stats:
             # Beta distribution parameters
@@ -260,7 +260,7 @@ class SelectionStatistics:
     def __str__(self) -> str:
         """Nicely formatted string representation"""
         lines = [
-            f"=== Adaptive Selection Statistics ===",
+            "=== Adaptive Selection Statistics ===",
             f"Strategy: {self.strategy_name}",
             f"Total calls: {self.total_calls}",
         ]
@@ -281,10 +281,10 @@ class SelectionStatistics:
 
 
 @dataclass
-class AdaptiveSelector(Generic[I, O]):
+class AdaptiveSelector(Generic[InputType, OutputType]):
     """Core class implementing the adaptive selection strategies"""
 
-    callables: list[Callable[[I], O]]
+    callables: list[Callable[[InputType], OutputType]]
     strategy: SelectionStrategy
 
     # Performance tracking (initialized in __post_init__)
@@ -301,7 +301,7 @@ class AdaptiveSelector(Generic[I, O]):
         window_size = self.strategy.window_size if isinstance(self.strategy, SlidingWindow) else 50
         self.recent_choices = deque(maxlen=window_size)
 
-    def select_and_execute(self, *args: I) -> O:
+    def select_and_execute(self, *args: InputType) -> OutputType:
         """Select an algorithm and execute it, tracking performance"""
         with self.lock:
             # Select which algorithm to use (polymorphically)
@@ -314,7 +314,7 @@ class AdaptiveSelector(Generic[I, O]):
             result = self.callables[chosen_idx](*args)
             success = True
         except Exception as e:
-            success = False
+            _ = False  # success flag (not used)
             raise e
         finally:
             execution_time = time.perf_counter() - start_time
@@ -355,14 +355,14 @@ class AdaptiveSelector(Generic[I, O]):
             strategy_name=self.strategy.name
         )
 
-class AdaptiveFunction(Protocol, Generic[I, O]):
-    def __call__(self, *args: I) -> O: ...
+class AdaptiveFunction(Protocol, Generic[InputType, OutputType]):
+    def __call__(self, *args: InputType) -> OutputType: ...
     def get_statistics(self) -> SelectionStatistics: ...
 
 def select_fastest(
-    callables: Iterable[Callable[[I], O]],
+    callables: Iterable[Callable[[InputType], OutputType]],
     strategy: SelectionStrategy,
-) -> AdaptiveFunction[I, O]:
+) -> AdaptiveFunction[InputType, OutputType]:
     """
     Create an adaptive function selector that learns which algorithm is fastest.
 
@@ -378,13 +378,13 @@ def select_fastest(
         strategy=strategy,
     )
 
-    def adaptive_function(*args: I) -> O:
+    def adaptive_function(*args: InputType) -> OutputType:
         return selector.select_and_execute(*args)
 
     # Add method to access statistics
     setattr(adaptive_function, 'get_statistics', selector.get_statistics)
 
-    return cast(AdaptiveFunction[I, O], adaptive_function) 
+    return cast(AdaptiveFunction[InputType, OutputType], adaptive_function) 
 
 
 # Example usage and testing

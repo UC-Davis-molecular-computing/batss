@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import batss as pp
 import random
@@ -29,7 +28,6 @@ def main():
 
     ls_pp = []
     ls_dir = []
-    import time
     omit_pp_collision = True
     for i in tqdm(range(trials)):
         # t1 = time.perf_counter()

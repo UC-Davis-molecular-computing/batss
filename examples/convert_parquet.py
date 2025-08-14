@@ -1,6 +1,5 @@
 import sys
 import polars as pl
-from collections import defaultdict
 import json
 import os
 

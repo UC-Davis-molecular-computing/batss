@@ -1,6 +1,5 @@
 import sys
 import importlib.util
-import os
 from pathlib import Path
 
 if False:
@@ -22,15 +21,8 @@ if False:
 
 
 import batss as pp
-import numpy as np
-import gpac as gp
-import polars as pl
-from matplotlib import pyplot as plt
-import rebop as rb
-import timeit
 
 def main():
-    import matplotlib.pyplot as plt
 
     make_and_save_plot(3)
     
@@ -43,7 +35,7 @@ def make_and_save_plot(pop_exponent: int) -> None:
     inits = {'R': r_init, 'F': f_init}
     end_time = 20.0
     num_samples = 10**3
-    print(f'done with rebop')
+    print('done with rebop')
 
     r,f = pp.species('R F')
     rxns = [

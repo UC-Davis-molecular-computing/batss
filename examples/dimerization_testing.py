@@ -1,11 +1,8 @@
-import math
 import numpy as np
-import random
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 import time
 import rebop as rb
-from scipy import stats
 import json
 from collections import defaultdict
 
@@ -120,7 +117,6 @@ def plot_results(fn_rebop_data: str, fn_ppsim_data_f64: str, fn_ppsim_data_f128:
     # figsize = (6,4)
     figsize = (5,4)
     _, ax = plt.subplots(figsize = figsize)
-    import matplotlib
     # matplotlib.rcParams.update({'font.size': 14}) # default font is too small for paper figures
     # matplotlib.rcParams['mathtext.fontset'] = 'cm' # use Computer Modern font for LaTeX
     rebop_ns, rebop_times = read_running_time_results(fn_rebop_data)
@@ -129,8 +125,8 @@ def plot_results(fn_rebop_data: str, fn_ppsim_data_f64: str, fn_ppsim_data_f128:
     ax.loglog(ppsim_ns_f64, ppsim_times_f64, label="batching f64 run time", marker="o")
     ax.loglog(ppsim_ns_f128, ppsim_times_f128, label="batching f128 run time", marker="o")
     ax.loglog(rebop_ns, rebop_times, label="rebop run time", marker="o")
-    ax.set_xlabel(f'Initial molecular count')
-    ax.set_ylabel(f'Run time (s)')
+    ax.set_xlabel('Initial molecular count')
+    ax.set_ylabel('Run time (s)')
     ax.set_xticks([10**i for i in range(3, 15)])
     ax.set_ylim(bottom=None, top=10**5)
     ax.legend(loc='upper left')
@@ -225,7 +221,7 @@ def plot_rebop_ppsim_histogram(pop_exponent: int, trials_exponent: int, species_
     ax.set_xlim((5,35))
     ax.set_xticks(range(5, 36, 5))
     ax.set_xlabel(f'count of species ${species_name}$')
-    ax.set_ylabel(f'empirical probability')
+    ax.set_ylabel('empirical probability')
     ax.set_title(f'count of species ${species_name}$ sampled at time {final_time} '
                  f'($n$=$10^{pop_exponent}$; trials=$10^{trials_exponent}$)')
     
@@ -409,7 +405,6 @@ def rebop_vilar_with_inits(pop_exponent: int) -> tuple[rb.Gillespie, dict[str, i
 
 def plot_dimerization_crn(pop_exponent: int, seed: int, num_runs: int = 1) -> None:
     import gpac as gp
-    import numpy as np
 
     n = 10**pop_exponent
     m,d = gp.species('M D')

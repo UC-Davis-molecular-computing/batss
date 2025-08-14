@@ -1,13 +1,8 @@
-import math
-import numpy as np
-import random
 from tqdm import tqdm
 from matplotlib import pyplot as plt, ticker
 import time
 import rebop as rb
-from scipy import stats
 import json
-import gillespy2 as gl
 
 import importlib.util
 from pathlib import Path
@@ -164,7 +159,6 @@ def plot_results(fn_rebop_data: str, fn_rebop_rust_data: str, fn_ppsim_data_f64:
     # figsize = (6,4)
     figsize = (5,4)
     _, ax = plt.subplots(figsize = figsize)
-    import matplotlib
     # matplotlib.rcParams.update({'font.size': 14}) # default font is too small for paper figures
     # matplotlib.rcParams['mathtext.fontset'] = 'cm' # use Computer Modern font for LaTeX
     rebop_ns, rebop_times = read_results(fn_rebop_data)
@@ -175,8 +169,8 @@ def plot_results(fn_rebop_data: str, fn_rebop_rust_data: str, fn_ppsim_data_f64:
     ax.loglog(ppsim_ns_f128, ppsim_times_f128, label="batching (f128)", marker=".")
     ax.loglog(rebop_ns, rebop_times, label="rebop (Python)", marker="^")
     ax.loglog(rebop_rust_ns, rebop_rust_times, label="rebop (Rust)", marker="s")
-    ax.set_xlabel(f'initial molecular count')
-    ax.set_ylabel(f'run time (s)')
+    ax.set_xlabel('initial molecular count')
+    ax.set_ylabel('run time (s)')
     ax.set_xticks([10**i for i in range(3, 15)])
     ax.legend(loc='upper left')
     ax.set_ylim(bottom=None, top=10**5)
@@ -358,7 +352,7 @@ def plot_rebop_ppsim_histogram(pop_exponent: int, trials_exponent: int, species:
     ax.legend()
 
     ax.set_xlabel(f'Count of species {species}')
-    ax.set_ylabel(f'Number of samples')
+    ax.set_ylabel('Number of samples')
     ax.set_title(f'Species {species} distribution sampled at simulated time {final_time}'
                  f'(n=$10^{pop_exponent}$; trials=$10^{trials_exponent}$)')
     

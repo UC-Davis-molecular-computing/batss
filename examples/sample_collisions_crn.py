@@ -1,4 +1,3 @@
-import math
 import numpy as np
 import batss as pp
 import random

@@ -2,7 +2,6 @@
 # because mpmath is the only arbitrary-precision library we can find that implements lgamma.
 
 from mpmath import mp, mpf
-import time
 
 def sample_coll(n: int, r: int, o: int, g: int, u: float) -> int:
     assert o > 0

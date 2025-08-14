@@ -1,13 +1,8 @@
-import math
-import numpy as np
 import batss as pp
-import random
 from tqdm import tqdm
 from matplotlib import pyplot as plt
-import timeit
 import time
 import rebop as rb
-from scipy import stats
 
 def measure_time(fn, trials=1):
     """
@@ -92,8 +87,8 @@ def test_time_scaling_vs_population():
     matplotlib.rcParams['mathtext.fontset'] = 'cm' # use Computer Modern font for LaTeX
     ax.loglog(ns_ppsim, ppsim_times, label="batching run time", marker="o")
     ax.loglog(ns_rebop, rebop_times, label="rebop run time", marker="o")
-    ax.set_xlabel(f'Initial molecular count')
-    ax.set_ylabel(f'Run time (s)')
+    ax.set_xlabel('Initial molecular count')
+    ax.set_ylabel('Run time (s)')
     ax.set_ylim(bottom=None, top=10**3)
     ax.legend()
     plt.savefig("lotka_volterra_scaling_f128.pdf", bbox_inches='tight')

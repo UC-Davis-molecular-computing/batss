@@ -8,11 +8,11 @@ from ppsim import species, reactions_to_dict, Reaction, Simulation
 class TestBasicProtocols(unittest.TestCase):
 
     def test_fratricide(self) -> None:
-        l, f = 'L', 'F'
-        fratricide = {(l, l): (l, f)}
-        sim = Simulation({l: 20}, fratricide)
+        live, fire = 'L', 'F'
+        fratricide = {(live, live): (live, fire)}
+        sim = Simulation({live: 20}, fratricide)
         sim.run()
-        self.assertEqual(sim.config_dict, {l: 1, f: 19})
+        self.assertEqual(sim.config_dict, {live: 1, fire: 19})
         self.assertEqual('', sim.enabled_reactions)
 
 
@@ -176,7 +176,7 @@ def assertDeepAlmostEqual(test_case: unittest.TestCase, expected: Any, actual: A
         *args: args to pass to TestCase.assertAlmostEqual
         **kwargs: kwargs to pass to TestCase.assertAlmostEqual
     """
-    is_root = not '__trace' in kwargs
+    is_root = '__trace' not in kwargs
     trace = kwargs.pop('__trace', 'ROOT')
     try:
         if isinstance(expected, (int, float, numpy.long, complex)):

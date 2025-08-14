@@ -1,6 +1,6 @@
 import math
-from typing import Iterable, Sequence
-from mpmath import hyp3f2, mpf, binomial, hyper, mp
+from typing import Sequence
+from mpmath import mpf, binomial, hyper, mp
 from mpmath import psi
 import numpy as np
 import numpy.typing as npt
@@ -132,7 +132,6 @@ def gammas_params_matching_hypo(
     return gammas
 
 
-from functools import lru_cache
 
 
 # XXX: many of the return types here should be `mpf` instead of `float`, but
@@ -726,7 +725,6 @@ def generate_running_time_data():
     import gamma
 
     importlib.reload(gamma)
-    from tqdm.auto import tqdm
     from tqdm.contrib import itertools
     import json
 
@@ -753,11 +751,11 @@ def generate_running_time_data():
                 )
             print(f"| trial {trial}:", end=" ")
 
-            print(f"hypo:  ", end="")
+            print("hypo:  ", end="")
             mean_time_sample_hypo = gamma.smart_timeit(
                 lambda: gamma.sample_hypo(rng, n, k, o, g)
             )
-            print(f"|          gamma: ", end="")
+            print("|          gamma: ", end="")
             mean_time_sample_gamma = gamma.smart_timeit(
                 lambda: gamma.sample_gamma_matching_hypo(rng, n, k, o, g)
             )
@@ -888,7 +886,6 @@ def generate_running_time_data_sampling(
     f2: Callable[[np.random.Generator, int, int, int, int], float],
     f2name: str,
 ) -> None:
-    import numpy as np
     import math
     from tqdm.contrib import itertools
     import json
