@@ -21,5 +21,3 @@ build:
       install:
          - echo "=== Installing minimal docs dependencies ==="
          - uv pip install -r docs-requirements.txt
-         - echo "=== Installing package without dependencies ==="
-         - uv pip install --no-deps .

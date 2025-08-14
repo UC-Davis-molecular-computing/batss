@@ -1,9 +1,5 @@
-# Docs requirements - avoiding heaviest packages
+# Ultra-minimal docs requirements
 sphinx>=7.0.0
 sphinx-rtd-theme
 sphinx-autodoc-typehints
 toml
-# Essential runtime deps (but skip scipy, matplotlib, pandas)
-numpy>=2
-natsort>=8
-tqdm>=4

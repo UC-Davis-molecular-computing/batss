@@ -80,16 +80,20 @@ suppress_warnings = [
 intersphinx_timeout = 5  # Reduce timeout for external inventories
 autodoc_typehints = 'description'  # Faster than signature
 
-# Mock only the heaviest dependencies
+# Mock ALL external dependencies for docs
 autodoc_mock_imports = [
     'gpac',
+    'numpy',
     'pandas', 
     'matplotlib',
     'matplotlib.pyplot',
+    'natsort',
+    'tqdm',
+    'tqdm.auto',
     'batss_rust',
     'batss.batss_rust',
     'batss.batss_rust.batss_rust',
 ]
 
-# Re-enable autosummary
-autosummary_generate = True
+# Disable autosummary to avoid import issues
+autosummary_generate = False
