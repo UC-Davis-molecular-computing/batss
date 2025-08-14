@@ -1,10 +1,11 @@
-# Balanced docs requirements - includes essential runtime deps
+# Docs requirements - include deps needed for union syntax
 sphinx>=7.0.0
 sphinx-rtd-theme
 sphinx-autodoc-typehints
 toml
-# Essential for autodoc to work
+# Essential for union type annotations to work
 numpy>=2
+pandas>=2
 natsort>=8
 tqdm>=4
-# Skip the heaviest: gpac (brings scipy, pandas, matplotlib)
+# Skip only the heaviest: gpac (brings scipy, matplotlib)

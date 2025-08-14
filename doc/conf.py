@@ -83,7 +83,6 @@ autodoc_typehints = 'description'  # Faster than signature
 # Mock only the heaviest dependencies 
 autodoc_mock_imports = [
     'gpac',
-    'pandas', 
     'matplotlib',
     'matplotlib.pyplot',
     'batss_rust',
