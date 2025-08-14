@@ -1,0 +1,7 @@
+# Minimal docs-only requirements
+sphinx>=7.0.0
+sphinx-rtd-theme
+sphinx-autodoc-typehints
+toml
+numpy>=2
+typing-extensions

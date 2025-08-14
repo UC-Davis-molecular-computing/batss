@@ -48,4 +48,7 @@ docs = [
     "sphinx-rtd-theme",
     "sphinx-autodoc-typehints",
     "toml",
+    # Minimal runtime deps needed for autodoc
+    "numpy>=2",
+    "typing-extensions",
 ]

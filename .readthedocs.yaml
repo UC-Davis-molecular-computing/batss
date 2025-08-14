@@ -15,4 +15,5 @@ build:
       create_environment:
          - uv venv "${READTHEDOCS_VIRTUALENV_PATH}"
       install:
-         - UV_PROJECT_ENVIRONMENT="${READTHEDOCS_VIRTUALENV_PATH}" uv sync --frozen --extra docs
+         - uv pip install -r docs-requirements.txt
+         - uv pip install --no-deps .

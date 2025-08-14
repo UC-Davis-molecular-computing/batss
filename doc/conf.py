@@ -33,7 +33,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # HTML output
 html_theme = 'sphinx_rtd_theme'
-html_static_path = ['_static']
+html_static_path = []  # Remove _static to avoid warning
 
 # Autodoc settings
 autodoc_member_order = 'bysource'
@@ -63,12 +63,10 @@ autosummary_generate = True
 #     ('py:class', 'Snapshot'),
 # ]
 
-# Intersphinx mapping for external references
+# Intersphinx mapping for external references (reduced for speed)
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
     'numpy': ('https://numpy.org/doc/stable', None),
-    'pandas': ('https://pandas.pydata.org/pandas-docs/stable', None),
-    'ipywidgets': ('https://ipywidgets.readthedocs.io/en/latest/', None),
 }
 
 # Suppress certain Sphinx warnings
@@ -76,3 +74,7 @@ suppress_warnings = [
     # Suppress duplicate object description warnings from autosummary
     'app.add_directive',
 ]
+
+# Performance optimizations
+intersphinx_timeout = 5  # Reduce timeout for external inventories
+autodoc_typehints = 'description'  # Faster than signature
