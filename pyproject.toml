@@ -7,6 +7,7 @@ name = "batss"
 version = "1.0.1"
 description = "A Python package with Rust backend for efficient simulation of chemical reaction networks using a batching algorithm."
 requires-python = ">=3.10"
+readme = "README.md"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Rust",
@@ -28,6 +29,11 @@ dependencies = [
     "gpac>=1",
     "polars>=1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/UC-Davis-molecular-computing/batss"
+Issues = "https://github.com/UC-Davis-molecular-computing/batss/issues"
+API = "https://batss.readthedocs.io/"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
