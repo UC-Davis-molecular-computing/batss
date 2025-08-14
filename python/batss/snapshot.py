@@ -16,20 +16,22 @@ in categories.
 in categories over time.
 """
 
-from typing import Callable, Hashable, Any, TYPE_CHECKING, Optional, ForwardRef
+from typing import TYPE_CHECKING, Any, Callable, Hashable, Optional
 
 if TYPE_CHECKING:
-    from batss.simulation import Simulation
-    from matplotlib.figure import Figure
     from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
+    from batss.simulation import Simulation
+
+from abc import ABC
+from dataclasses import dataclass
 
 import matplotlib.pyplot as plt
-from natsort import natsorted
 import numpy as np
 import pandas as pd  # type: ignore
+from natsort import natsorted
 from tqdm import tqdm
-from dataclasses import dataclass
-from abc import ABC
 
 
 @dataclass
@@ -70,7 +72,7 @@ class Snapshot(ABC):
         Init constructor for the base class.
 
         Parameters can be passed in here, and any attributes that can be defined
-        without the parent :class:`ppsim.simulation.Simulation` object can be instantiated here, 
+        without the parent :class:`ppsim.simulation.Simulation` object can be instantiated here,
         such as :data:`Snapshot.update_time`.
         """
         self.simulation = None
@@ -80,14 +82,16 @@ class Snapshot(ABC):
         self.next_snapshot_time = 0.0
 
     def initialize(self) -> None:
-        """Method which is called once during :meth:`ppsim.simulation.Simulation.add_snapshot`. 
+        """Method which is called once during :meth:`ppsim.simulation.Simulation.add_snapshot`.
         Should only be called after :meth:`ppsim.simulation.Simulation.add_snapshot` is called.
 
         Any initialization that requires accessing the data in :data:`Snapshot.simulation`
         should go here.
         """
         if self.simulation is None:
-            raise ValueError('self.simulation is None, cannot call self.initialize until using sim.add_snapshot')
+            raise ValueError(
+                "self.simulation is None, cannot call self.initialize until using sim.add_snapshot"
+            )
 
     def update(self, index: int | None = None) -> None:
         """Method which is called while :data:`Snapshot.simulation` is running.
@@ -99,7 +103,9 @@ class Snapshot(ABC):
                 configuration :meth:`ppsim.simulation.Simulation.config_array` and current time.
         """
         if self.simulation is None:
-            raise ValueError('self.simulation is None, cannot call self.update until using sim.add_snapshot')
+            raise ValueError(
+                "self.simulation is None, cannot call self.update until using sim.add_snapshot"
+            )
         if index is not None:
             self.time = self.simulation.times[index]
             self.config = self.simulation.configs[index]
@@ -113,7 +119,7 @@ class TimeUpdate(Snapshot):
     """
     Simple :class:`Snapshot` that prints the current time in the :class:`ppsim.simulation.Simulation`.
 
-    When calling :class:`ppsim.simulation.Simulation.run`, if :data:`ppsim.simulation.Simulation.snapshots` is empty, 
+    When calling :class:`ppsim.simulation.Simulation.run`, if :data:`ppsim.simulation.Simulation.snapshots` is empty,
     then this object will get added to provide a basic progress update.
     """
 
@@ -127,9 +133,13 @@ class TimeUpdate(Snapshot):
     The starting time of the simulation.
     """
 
-    def __init__(self, time_bound: float | None = None, update_time: float = 0.2) -> None:
+    def __init__(
+        self, time_bound: float | None = None, update_time: float = 0.2
+    ) -> None:
         super().__init__(update_time)
-        self.pbar = tqdm(total=time_bound, position=0, leave=False, unit=' time simulated')
+        self.pbar = tqdm(
+            total=time_bound, position=0, leave=False, unit=" time simulated"
+        )
         self.start_time = 0
 
     def initialize(self) -> None:
@@ -190,8 +200,12 @@ class Plotter(Snapshot):
     of counts of categories. Used internally to get counts of categories.
     """
 
-    def __init__(self, state_map: Callable[[Hashable], Any] | None = None, update_time: float = 0.5,
-                 yscale: str = 'linear') -> None:
+    def __init__(
+        self,
+        state_map: Callable[[Hashable], Any] | None = None,
+        update_time: float = 0.5,
+        yscale: str = "linear",
+    ) -> None:
         """Initializes the :class:`Plotter`.
 
         Args:
@@ -214,12 +228,17 @@ class Plotter(Snapshot):
         assert self.simulation is not None
 
         for state in self.simulation.state_list:
-            if self.state_map(state) is not None and self.state_map(state) not in self.categories:
+            if (
+                self.state_map(state) is not None
+                and self.state_map(state) not in self.categories
+            ):
                 self.categories.append(self.state_map(state))
         self.categories = natsorted(self.categories, key=lambda x: repr(x))
 
         categories_dict = {j: i for i, j in enumerate(self.categories)}
-        self._matrix = np.zeros((len(self.simulation.state_list), len(self.categories)), dtype=np.int64)
+        self._matrix = np.zeros(
+            (len(self.simulation.state_list), len(self.categories)), dtype=np.int64
+        )
         for i, state in enumerate(self.simulation.state_list):
             m = self.state_map(state)
             if m is not None:
@@ -246,14 +265,17 @@ class StatePlotter(Plotter):
         assert self.simulation is not None
         assert self.fig is not None
         import seaborn as sns
-        self.ax = sns.barplot(x=[str(c) for c in self.categories], y=np.zeros(len(self.categories)))
+
+        self.ax = sns.barplot(
+            x=[str(c) for c in self.categories], y=np.zeros(len(self.categories))
+        )
         assert self.ax is not None
         # rotate the x-axis labels if any of the label strings have more than 2 characters
         if max([len(str(c)) for c in self.categories]) > 2:
             for tick in self.ax.get_xticklabels():
                 tick.set_rotation(90)
         self.ax.set_yscale(self.yscale)
-        if self.yscale in ['symlog', 'log']:
+        if self.yscale in ["symlog", "log"]:
             self.ax.set_ylim(0, 2 * self.simulation.simulator.n)
         else:
             self.ax.set_ylim(0, self.simulation.simulator.n)
@@ -269,9 +291,9 @@ class StatePlotter(Plotter):
         else:
             heights = self.config
         for i, rect in enumerate(self.ax.patches):
-            rect.set_height(heights[i]) # type: ignore
+            rect.set_height(heights[i])  # type: ignore
 
-        self.ax.set_title(f'Time {self.time: .3f}')
+        self.ax.set_title(f"Time {self.time: .3f}")
         self.fig.tight_layout()
         self.fig.canvas.draw()
 
@@ -287,15 +309,17 @@ class HistoryPlotter(Plotter):
         assert self.ax is not None
         self.ax.clear()
         if self._matrix is not None:
-            df = pd.DataFrame(data=np.matmul(self.simulation.history.to_numpy(), self._matrix),
-                              columns=self.categories,
-                              index=self.simulation.history.index)
+            df = pd.DataFrame(
+                data=np.matmul(self.simulation.history.to_numpy(), self._matrix),
+                columns=self.categories,
+                index=self.simulation.history.index,
+            )
         else:
             df = self.simulation.history
         df.plot(ax=self.ax)
 
         self.ax.set_yscale(self.yscale)
-        if self.yscale in ['symlog', 'log']:
+        if self.yscale in ["symlog", "log"]:
             self.ax.set_ylim(0, 2 * self.simulation.simulator.n)
         else:
             self.ax.set_ylim(0, 1.1 * self.simulation.simulator.n)
