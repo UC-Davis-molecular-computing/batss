@@ -3,8 +3,9 @@ import sys
 import toml
 from pathlib import Path
 
-# Add project root to path
+# Add project root and python source to path
 sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('../python'))
 
 # Read version from pyproject.toml
 pyproject_path = Path(__file__).parents[1] / "pyproject.toml"
@@ -79,5 +80,16 @@ suppress_warnings = [
 intersphinx_timeout = 5  # Reduce timeout for external inventories
 autodoc_typehints = 'description'  # Faster than signature
 
-# Disable autosummary to speed up build
-autosummary_generate = False
+# Mock only the heaviest dependencies
+autodoc_mock_imports = [
+    'gpac',
+    'pandas', 
+    'matplotlib',
+    'matplotlib.pyplot',
+    'batss_rust',
+    'batss.batss_rust',
+    'batss.batss_rust.batss_rust',
+]
+
+# Re-enable autosummary
+autosummary_generate = True
