@@ -7,10 +7,11 @@ build:
   jobs:
     pre_install:
       - pip install uv
+      - export PATH="$HOME/.local/bin:$PATH"
     post_checkout:
-      - uv sync --extra docs
+      - python -m uv sync --extra docs
     post_install:
-      - uv run python -c "import batss; print('Package imported successfully')"
+      - python -m uv run python -c "import batss; print('Package imported successfully')"
 
 sphinx:
   configuration: doc/conf.py
