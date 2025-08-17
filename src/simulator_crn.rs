@@ -261,8 +261,6 @@ impl UniformCRN {
     // }
 }
 
-//TODO: consider using ndarrays instead of multi-dimensional vectors
-// I think native Rust arrays won't work because their size needs to be known at compile time.
 #[pyclass(extends = Simulator)]
 pub struct SimulatorCRNMultiBatch {
     /// The CRN with a list of reactions, so we can recompute probabilities when the
@@ -855,6 +853,8 @@ struct NDBatchResult {
 }
 
 impl NDBatchResult {
+    // Recursive function used to generate new NDBatchResult.
+    // Creates and initializes all recursive substructures.
     fn populate_empty(&mut self) {
         if self.dimensions > 1 {
             for _ in 0..self.q {
@@ -877,6 +877,8 @@ impl NDBatchResult {
             }
         }
     }
+    // Recursive function to sample how many of each possible reaction vector
+    // happen within some batch, using hypergeometric sampling via sample_vector.
     fn sample_batch_result(&mut self, num_reactions: u64, urn: &mut Urn) {
         urn.sample_vector(num_reactions, &mut self.counts).unwrap();
         self.curr_species = 0;
@@ -887,7 +889,12 @@ impl NDBatchResult {
             }
         }
     }
-    // TODO docstring here. Also this should probably implement an iterable trait
+    // Method used for recursively iterating through NDBatchResult.
+    // Returns triple (reactants, count, done).
+    // reactants: which reactant vector this entry represents
+    // count: how many times that reactant vector has been sampled in this batch
+    // done: true iff this is the last entry in the NDBatchResult.
+    // TODO this should probably implement an iterable trait
     fn get_next(&mut self) -> (Vec<State>, u64, bool) {
         assert!(
             self.curr_species < self.q,
@@ -1411,7 +1418,7 @@ impl SimulatorCRNMultiBatch {
 
     /// Sample a collision event from the urn
     /// Returns a sample l ~ coll(n, r, o, g) from the collision length distribution.
-    /// See TODO: add reference to paper once it's on arxiv.
+    /// See https://arxiv.org/abs/2508.04079
     /// The distribution gives the number of reactions that will occur before a collision.
     /// Inversion sampling with binary search is used, based on the formula
     ///     P(l >= t) = (n-r)! / (n-r-t*o)! * prod_{j=0}^{o-1} [(n-g-j)!(g) / (n+g(t-1)-j)!(g)].
@@ -1748,7 +1755,19 @@ impl SimulatorCRNMultiBatch {
         t_lo
     }
 
-    /// TODO: docstring
+    /// Rejection sampling to ensure that we sample at exactly the right time if a batch
+    /// runs past t_max. We do this by binary searching: if the simulation went past t_max
+    /// in some run of l reactions, we can sample how long the first half of them took,
+    /// and binary search in this manner to figure out the first index of a reaction that
+    /// goes past t_max. The actual rejection sampling conditions are complicated, due to
+    /// the method assuming that t must exceed t_max by the time l reactions have occurred.
+    ///
+    /// Args:
+    ///     l: number of reactions to search within
+    ///     t_max: time which is known to be exceeded within l reactions
+    ///
+    /// Returns:
+    ///     Index of the reaction at which the total time taken first exceeds t_max.
     fn checkpoint_rejection_sampling(&mut self, l: u64, t_max: f64) -> u64 {
         // We assume (by preconditioning) initially that the CRN goes past t_max in l reactions.
         // We binary search for the index of the interaction, indexing from 0, at which it goes over.
