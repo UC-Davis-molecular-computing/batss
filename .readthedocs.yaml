@@ -6,7 +6,7 @@ sphinx:
    fail_on_warning: false
 
 build:
-   os: ubuntu-24.04
+   os: ubuntu-latest
    tools:
       python: "3.13"
    jobs:
