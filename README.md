@@ -9,7 +9,7 @@ If you find ppsim useful in a scientific project, please cite its associated pap
 > <ins>Exactly simulating stochastic chemical reaction networks in sub-constant time per reaction</ins>.  
   Joshua Petrack and David Doty.
   preprint  
-  [ [paper](http://arxiv.org/abs/TODO) | [BibTeX](TODO) ]
+  [ [paper](http://arxiv.org/abs/2508.04079) | [BibTeX](TODO) ]
 
 The core of the simulator uses a modification of a [batching algorithm](https://arxiv.org/abs/2005.03584) for population protocols (chemical reaction networks with exactly two reactants and two products per reaction) that gives significant asymptotic gains for protocols with relatively small reachable state sets. The package is designed to be run in a Python notebook, to concisely describe complex protocols, efficiently simulate their dynamics, and provide helpful visualization of the simulation.
 
