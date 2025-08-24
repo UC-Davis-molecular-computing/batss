@@ -2,14 +2,14 @@
 
 The `batss` package is used for simulating population protocols. The package and further example notebooks can be found on [Github](https://github.com/UC-Davis-molecular-computing/batss).
 
-**NOTE:** The original version of ppsim (versions prior to 1.0.0) was implemented in Cython and hosted at a different repository: https://github.com/UC-Davis-molecular-computing/ppsim. The current version hosted at this repo has the time-critical parts of the algorithm implemented in Rust rather than Cython.
-
-If you find ppsim useful in a scientific project, please cite its associated paper:
+If you find batss useful in a scientific project, please cite its associated paper:
 
 > <ins>Exactly simulating stochastic chemical reaction networks in sub-constant time per reaction</ins>.  
   Joshua Petrack and David Doty.
   preprint  
   [ [paper](http://arxiv.org/abs/2508.04079) | [BibTeX](TODO) ]
+
+NOTE: below here is old documentation from a related project [ppsim](https://github.com/UC-Davis-molecular-computing/ppsim-rust). Please check back later for updated documentation. In the meantime some examples of usage can be seen in the folder examples.
 
 The core of the simulator uses a modification of a [batching algorithm](https://arxiv.org/abs/2005.03584) for population protocols (chemical reaction networks with exactly two reactants and two products per reaction) that gives significant asymptotic gains for protocols with relatively small reachable state sets. The package is designed to be run in a Python notebook, to concisely describe complex protocols, efficiently simulate their dynamics, and provide helpful visualization of the simulation.
 
