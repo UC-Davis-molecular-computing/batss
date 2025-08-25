@@ -1,0 +1,9 @@
+@misc{petrack2025exactlysimulatingstochasticchemical,
+      title={Exactly simulating stochastic chemical reaction networks in sub-constant time per reaction}, 
+      author={Joshua Petrack and David Doty},
+      year={2025},
+      eprint={2508.04079},
+      archivePrefix={arXiv},
+      primaryClass={cs.DS},
+      url={https://arxiv.org/abs/2508.04079}, 
+}
