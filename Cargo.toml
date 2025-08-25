@@ -2,32 +2,15 @@
 name = "batss"
 # supposedly maturin uses the version from pyproject.toml when publishing to PyPi, 
 # so it should not matter what this is, but I try to remember to keep it in sync.
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 
 [lib]
 name = "batss_rust"
 crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "main"
-path = "src/main.rs"
-required-features = ["rebop-dep"]
-
-[[bin]]
-name = "rebop"
-path = "src/generate_rebop_samples.rs"
-required-features = ["rebop-dep"]
-
-[[bin]]
-name = "time_rebop"
-path = "src/rebop_runtime_sampling.rs"
-required-features = ["rebop-dep"]
-
 [features]
-default = ["rebop-dep"]
 flm = ["flame"]  # Enable flame profiling to be switched on/off
-rebop-dep = ["rebop"]  # Make rebop optional to fix macOS builds
 
 
 [dependencies]
