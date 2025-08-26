@@ -1,5 +1,6 @@
 # Note: this example currently doesn't work. It was written to simulate the Oregonator,
 # but we couldn't get the rate constants to work (with either batss or rebop).
+# Rate constants obtained from https://www.pnas.org/doi/10.1073/pnas.0909380107
 
 import sys
 import importlib.util
