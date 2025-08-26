@@ -1,3 +1,6 @@
+# Note: this example currently doesn't work. It was written to simulate the Oregonator,
+# but we couldn't get the rate constants to work (with either batss or rebop).
+
 import sys
 import importlib.util
 from pathlib import Path
