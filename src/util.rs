@@ -361,7 +361,7 @@ const SQRT2: f128 = 1.41421356237309504880168872420977;
 
 // f128 natural log. Mostly copied from https://github.com/rust-lang/libm/blob/master/libm/src/math/log.rs
 pub fn ln_f128(x: f128) -> f128 {
-    let print: bool = x == 156951994071_u64 as f128;
+    // let print: bool = x == 156951994071_u64 as f128;
     // flame::start("Part 1");
     // assert!(x >= 1.0, "ln_f128 assumes its input is at least 1.");
     // Get the exponent from the f128. It has one sign bit followed by 15 exponent bits.
@@ -408,17 +408,6 @@ pub fn ln_f128(x: f128) -> f128 {
     let r: f128 = t2 + t1;
     // flame::end("Part 4");
     let out = s * (hfsq + r) - hfsq + f + k_times_ln_2;
-    if print {
-        println!(
-            "Out, normx, f, z, w, exponent: {:?}, {:?}, {:?}, {:?}, {:?}, {:?}",
-            f128_to_decimal(out),
-            f128_to_decimal(normalized_x),
-            f128_to_decimal(f),
-            f128_to_decimal(z),
-            f128_to_decimal(w),
-            exponent
-        );
-    }
     out
 }
 

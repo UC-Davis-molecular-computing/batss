@@ -1531,14 +1531,31 @@ impl SimulatorCRNMultiBatch {
         t_lo = 0;
         t_hi = 1 + ((self.n_including_extra_species - r) / self.crn.o as u64);
 
+        // Calling high-precision ln_gamma in this loop is extremely expensive at high molecular count.
+        // We can get away with low-precision calls until LHS and RHS are so close that we need
+        // the higher precision offered by it.
+        let mut use_high_precision_in_loop: bool = false;
+
         // We maintain the invariant that P(l >= t_lo) >= u and P(l >= t_hi) < u
         while t_lo < t_hi - 1 {
             let t_mid = (t_lo + t_hi) / 2;
             // rhs tracks all of the terms that include t, i.e., those that we need to
             // update each iteration of binary search.
-            let mut rhs = ln_gamma_manual_high_precision(
-                (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f128 + 1.0,
-            );
+            let mut rhs;
+            // This tracks a value that we calculated from the faster (f64-based) lngamma,
+            // so we can check later if we need to switch to high-precision.
+            let mut last_lngamma_value: f64 = 0.0;
+            if use_high_precision_in_loop {
+                rhs = ln_gamma_manual_high_precision(
+                    (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f128
+                        + 1.0,
+                );
+            } else {
+                last_lngamma_value = ln_gamma(
+                    (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f64 + 1.0,
+                );
+                rhs = last_lngamma_value as f128;
+            }
             if self.crn.g > 0 {
                 for j in 0..self.crn.o {
                     // Calculates b = ceil((n+g(t-1)-j)/g).
@@ -1550,11 +1567,20 @@ impl SimulatorCRNMultiBatch {
                         / self.crn.g as f64)
                         .ceil() as u64;
                     rhs += (num_dynamic_terms as f128) * ln_g;
-                    rhs += ln_gamma_manual_high_precision(
-                        (self.n_including_extra_species + (self.crn.g as u64 * t_mid) - j as u64)
-                            as f128
-                            / self.crn.g as f128,
-                    );
+                    if use_high_precision_in_loop {
+                        rhs += ln_gamma_manual_high_precision(
+                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid)
+                                - j as u64) as f128
+                                / self.crn.g as f128,
+                        );
+                    } else {
+                        rhs += ln_gamma(
+                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid)
+                                - j as u64) as f64
+                                / self.crn.g as f64,
+                        ) as f128;
+                    }
+
                     rhs -= ln_gamma_small_rational(
                         (self.n_including_extra_species as isize
                             + (self.crn.g as isize * (t_mid as isize - num_dynamic_terms as isize))
@@ -1566,8 +1592,13 @@ impl SimulatorCRNMultiBatch {
                 // g = 0 case is much simpler; there's no multifactorial, as it's analogous
                 // to the population protocols case.
                 for j in 0..self.crn.o {
-                    rhs += (t_mid as f128)
-                        * ln_f128((self.n_including_extra_species - j as u64) as f128);
+                    if use_high_precision_in_loop {
+                        rhs += (t_mid as f128)
+                            * ln_f128((self.n_including_extra_species - j as u64) as f128);
+                    } else {
+                        rhs += (t_mid as f128)
+                            * ((self.n_including_extra_species - j as u64) as f64).ln() as f128;
+                    }
                 }
             }
 
@@ -1586,6 +1617,19 @@ impl SimulatorCRNMultiBatch {
             //     f128_to_decimal(rhs)
             // );
             assert!(!lhs.is_nan() && !rhs.is_nan());
+            // If the calculation of whether rhs or lhs might depend on f128-level precision
+            // for the ln_gamma calculation, we need to start using it (including in the iteration
+            // we just tried to compute).
+            // There are self.crn.o calls to lngamma in each loop iteration, and each of them
+            // might be wrong by around the magnitude of the computed value times epsilon.
+            // Also gonna throw in a 1.5 to be safer.
+            if !use_high_precision_in_loop
+                && (lhs - rhs).abs()
+                    < (last_lngamma_value * 1.5 * self.crn.o as f64 * f64::EPSILON) as f128
+            {
+                use_high_precision_in_loop = true;
+                continue;
+            }
             if lhs < rhs {
                 t_hi = t_mid;
             } else {
