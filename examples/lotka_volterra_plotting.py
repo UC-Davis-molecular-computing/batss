@@ -33,7 +33,7 @@ def main():
     # print(default_colors)
     # return
     # for pop_exponent in [3,4,5,8]:
-    for pop_exponent in [5]:
+    for pop_exponent in [7]:
         #XXX: pop_exponent 5 and 6 these show the slowdown bug in ppsim
         # going to time 20, for n=10^5 around time 6.966 (35% progress bar)
         # and for n=10^6, around time 13.718 (69% progress bar),
@@ -156,6 +156,7 @@ def plot_null_reactions(pop_exponent: int, seed: int) -> None:
     non_null_steps = np.array(sim.discrete_steps_no_nulls_last_run)[1:-1]
     null_steps = total_steps - non_null_steps
     null_fractions = null_steps / total_steps
+    non_null_fractions = non_null_steps / total_steps
     times = sim.history.index.tolist()[1:-1] # make same length as null_fractions
     
     f, ax = plt.subplots(figsize=figsize)
@@ -167,15 +168,16 @@ def plot_null_reactions(pop_exponent: int, seed: int) -> None:
 
     # Set up the left y-axis
     ax.set_ylabel('counts')
+    ax.set_xlabel('Simulated time (Lotka Volterra)')
 
     # Create a second y-axis that shares the same x-axis
     ax2 = ax.twinx()
 
     # Plot null_fractions on the second y-axis
-    ax2.plot(times, null_fractions, label='passive', color=red)
+    ax2.plot(times, non_null_fractions, label='non-passive', color=red)
 
     # Set up the right y-axis
-    ax2.set_ylabel('fraction of passive reactions')
+    ax2.set_ylabel('fraction of real (non-passive) reactions')
     ax2.set_ylim(0.0, 1.0)
 
     # Create a single legend with handles from both axes
@@ -186,7 +188,7 @@ def plot_null_reactions(pop_exponent: int, seed: int) -> None:
     plt.show()
 
 if __name__ == "__main__":
-    main()
-    # pop_exponent = 8
-    # seed = 1
-    # plot_null_reactions(pop_exponent, seed)
+    # main()
+    pop_exponent = 5
+    seed = 1
+    plot_null_reactions(pop_exponent, seed)

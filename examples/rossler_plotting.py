@@ -23,10 +23,10 @@ if False:
 import batss as pp
 from matplotlib import pyplot as plt
 import rebop as rb
-
+import numpy as np
 def main():
     crn = rb.Gillespie()
-    pop_exponent = 4
+    pop_exponent = 3
     crn.add_reaction(30, ['X1'], ['X1', 'X1'])
     crn.add_reaction(0.5 * .1 ** pop_exponent, ['X1', 'X1'], ['X1'])
     crn.add_reaction(1 * .1 ** pop_exponent, ['X2', 'X1'], ['X2', 'X2'])
@@ -39,7 +39,7 @@ def main():
     x2_init = int(n / 3)
     x3_init = int(n / 3)
     inits = {"X1": x1_init, "X2": x2_init, "X3": x3_init}
-    end_time = 8
+    end_time = 1
     num_samples = 500
     results_rebop = {}
     results_rebop = crn.run(inits, end_time, num_samples)
@@ -56,7 +56,7 @@ def main():
     ]
     inits = {x1: x1_init, x2: x2_init, x3: x3_init}
     print(inits) #type: ignore 
-    sim = pp.Simulation(inits, rxns, simulator_method="crn", continuous_time=True)
+    sim = pp.Simulation(inits, rxns, simulator_method="crn", continuous_time=True, seed=1)
     print(sim.simulator.transition_probabilities) #type: ignore 
 
     sim.run(end_time, end_time / num_samples)
@@ -106,5 +106,77 @@ def main():
     # plt.title('approximate majority (ppsim)')
     # plt.show()
     # print("Done!")
+
+
+def plot_null_reactions(pop_exponent: int, seed: int) -> None:
+    n = int(10 ** pop_exponent)
+    x1_init = int(n / 3)
+    x2_init = int(n / 3)
+    x3_init = int(n / 3)
+    inits = {"X1": x1_init, "X2": x2_init, "X3": x3_init}
+
+    x1,x2,x3 = pp.species('X1 X2 X3')
+    rxns = [
+        (x1 >> 2*x1).k(30),
+        (2*x1 >> x1).k(0.5),
+        (x2+x1 >> 2*x2).k(1),
+        (x2 >> None).k(10),
+        (x1+x3 >> None).k(1),
+        (x3 >> 2*x3).k(16.5),
+        (2*x3 >> x3).k(0.5),
+    ]
+    inits = {x1: x1_init, x2: x2_init, x3: x3_init}
+    figsize = (12, 6)
+    end_time = 10.0
+    num_samples = 10**3
+    
+    
+    sim = pp.Simulation(inits, rxns, simulator_method="crn", continuous_time=True, seed=seed)
+
+    print(f'running batss with n = 10^{pop_exponent}')
+    sim.run(end_time, end_time / num_samples)
+
+    
+    # total steps starts with 0 (and for some reason ends with 0, I don't get that),
+    # so we slice it to remove the first and last element to avoid dividing by zero.
+    total_steps = np.array(sim.discrete_steps_total_last_run)[1:-1]
+    non_null_steps = np.array(sim.discrete_steps_no_nulls_last_run)[1:-1]
+    null_steps = total_steps - non_null_steps
+    null_fractions = null_steps / total_steps
+    non_null_fractions = non_null_steps / total_steps
+    times = sim.history.index.tolist()[1:-1] # make same length as null_fractions
+    
+    f, ax = plt.subplots(figsize=figsize)
+
+    blue, orange, green, red  = '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'
+    # Create the primary plot with species counts (left y-axis)
+    ax.plot(sim.history['X1'], label='X1', color=blue)
+    ax.plot(sim.history['X2'], label='X2', color=orange)
+    ax.plot(sim.history['X3'], label='X3', color=green)
+
+    # Set up the left y-axis
+    ax.set_ylabel('counts')
+    ax.set_xlabel('Simulated time (Rossler)')
+
+    # Create a second y-axis that shares the same x-axis
+    ax2 = ax.twinx()
+
+    # Plot null_fractions on the second y-axis
+    ax2.plot(times, non_null_fractions, label='non-passive', color=red)
+
+    # Set up the right y-axis
+    ax2.set_ylabel('fraction of real (non-passive) reactions')
+    ax2.set_ylim(0.0, 1.0)
+
+    # Create a single legend with handles from both axes
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(handles1 + handles2, labels1 + labels2, loc='lower right')
+    plt.savefig(f'data/rossler_plot_with_passive_reactions_n1e{pop_exponent}.pdf', bbox_inches='tight')
+    plt.show()
+
 if __name__ == "__main__":
-    main()
+    # main()
+    pop_exponent = 5
+    seed = 1
+    plot_null_reactions(pop_exponent, seed)

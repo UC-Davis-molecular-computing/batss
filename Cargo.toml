@@ -9,8 +9,25 @@ edition = "2021"
 name = "batss_rust"
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "main"
+path = "src/main.rs"
+required-features = ["rebop-dep"]
+
+[[bin]]
+name = "rebop"
+path = "src/generate_rebop_samples.rs"
+required-features = ["rebop-dep"]
+
+[[bin]]
+name = "time_rebop"
+path = "src/rebop_runtime_sampling.rs"
+required-features = ["rebop-dep"]
+
 [features]
+default = ["rebop-dep"]
 flm = ["flame"]  # Enable flame profiling to be switched on/off
+rebop-dep = ["rebop"]  # Make rebop optional to fix macOS builds
 
 
 [dependencies]

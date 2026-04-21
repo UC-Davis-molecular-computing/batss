@@ -112,7 +112,12 @@ pub fn ln_gamma_manual_high_precision(x: f128) -> f128 {
     }
 }
 
-const MIN_LARGE_LN_GAMMA_INPUT: f128 = 100_000_000_000.0;
+// This const used to be actually large (10^12) but it seemed that even then the floating point
+// bug showed up sometimes, on population size as low as ~3 * 10 ^ 9.
+// So instead this is a sanity check of sorts; the actual logic making sure we don't do anything
+// expensive on small inputs will be in the simulation code, where we can directly see how much
+// error the calculation currently has.
+const MIN_LARGE_LN_GAMMA_INPUT: f128 = 1_000.0;
 pub fn ln_gamma_manual_high_precision_large(x: f128) -> f128 {
     assert!(
         x > MIN_LARGE_LN_GAMMA_INPUT,
@@ -361,26 +366,16 @@ const SQRT2: f128 = 1.41421356237309504880168872420977;
 
 // f128 natural log. Mostly copied from https://github.com/rust-lang/libm/blob/master/libm/src/math/log.rs
 pub fn ln_f128(x: f128) -> f128 {
-    // let print: bool = x == 156951994071_u64 as f128;
-    // flame::start("Part 1");
-    // assert!(x >= 1.0, "ln_f128 assumes its input is at least 1.");
+    assert!(x >= 1.0, "ln_f128 assumes its input is at least 1.");
     // Get the exponent from the f128. It has one sign bit followed by 15 exponent bits.
     // https://en.wikipedia.org/wiki/Quadruple-precision_floating-point_format
-    // flame::start("bitshift");
     let exponent_raw = (x.to_bits() << 1) >> 113;
-    // TODO: try making exponent 16 or 32 bits.
-    // flame::end("bitshift");
-    // flame::start("cast_signed");
     let exponent = exponent_raw.cast_signed() - 0x3FFF;
-    // flame::end("cast_signed");
     // We don't expect to call ln on anything less than 1.
-    // assert!(
-    //     exponent >= 0,
-    //     "exponent should be nonnegative, since we assume x >= 1.0"
-    // );
-
-    // flame::end("Part 1");
-    // flame::start("Part 2");
+    assert!(
+        exponent >= 0,
+        "exponent should be nonnegative, since we assume x >= 1.0"
+    );
     // Get a value betwen 1 and 2.
     // TODO: rename/add extra variables to make it easier to go back and understand this in comparison
     // with the document that explains it well.
@@ -392,21 +387,16 @@ pub fn ln_f128(x: f128) -> f128 {
         k += 1;
     }
     let k_times_ln_2 = k as f128 * LN2;
-    // flame::end("Part 2");
-    // flame::start("Part 3");
 
     let f: f128 = normalized_x - 1.0;
     let hfsq: f128 = 0.5 * f * f;
     let s: f128 = f / (2.0 + f);
     let z: f128 = s * s;
     let w: f128 = z * z;
-    // flame::end("Part 3");
-    // flame::start("Part 4");
     let t1: f128 = w * (LG2 + w * (LG4 + w * (LG6 + w * (LG8 + w * (LG10 + w * LG12)))));
     let t2: f128 =
         z * (LG1 + w * (LG3 + w * (LG5 + w * (LG7 + w * (LG9 + w * (LG11 + w * LG13))))));
     let r: f128 = t2 + t1;
-    // flame::end("Part 4");
     let out = s * (hfsq + r) - hfsq + f + k_times_ln_2;
     out
 }

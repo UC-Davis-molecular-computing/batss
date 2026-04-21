@@ -29,8 +29,8 @@ use crate::simulator_abstract::Simulator;
 
 use crate::urn::Urn;
 use crate::util::{
-    binomial_as_f64, ln_f128, ln_factorial, ln_gamma, ln_gamma_manual_high_precision,
-    ln_gamma_small_rational, multinomial_sample,
+    binomial_as_f64, f128_to_decimal, ln_f128, ln_factorial, ln_gamma,
+    ln_gamma_manual_high_precision, ln_gamma_small_rational, multinomial_sample,
 };
 
 type State = usize;
@@ -1393,10 +1393,10 @@ impl SimulatorCRNMultiBatch {
         // TODO: maybe do something more complicated than this to actually be efficient.
         // For now, it looks like construct_transition_arrays is a bottleneck, so we're only going
         // to change the count of K if the population size has significantly changed, or
-        // we're constructing them for the first time or resetting e
+        // we're constructing them for the first time or resetting
         let current_k_count = self.urn.config[self.crn.k];
-        let k_count = self.n / 2;
-        let delta_k = k_count as i64 - current_k_count as i64;
+        let target_k_count = self.n;
+        let delta_k = target_k_count as i64 - current_k_count as i64;
         assert!(self.n_including_extra_species as i64 + delta_k >= 0);
         self.n_including_extra_species = (self.n_including_extra_species as i64 + delta_k) as u64;
         self.urn.add_to_entry(self.crn.k, delta_k);
@@ -1404,7 +1404,7 @@ impl SimulatorCRNMultiBatch {
             self.random_transitions,
             self.random_outputs,
             self.transition_probabilities,
-        ) = self.crn.construct_transition_arrays(k_count);
+        ) = self.crn.construct_transition_arrays(target_k_count);
     }
 
     /// Get rid of W from self.urn.
@@ -1469,26 +1469,27 @@ impl SimulatorCRNMultiBatch {
         // We take ln(u) before converting. This is fine, because we don't need high precision
         // for ln(u) itself; its lowest-order bits aren't affecting the calculation.
         // This allows the hand-rolled ln_f128 to assume its input is at least 1, since this
-        // is the only call to ln on something greater, since small inputs to ln_gamma
+        // is the only call to ln on something smaller, since small inputs to ln_gamma
         // are handled by rational special casing.
-        // Similarly, imprecision in ln(g) won't hurt us here.
         let ln_u = u.ln() as f128;
-        let ln_g = (self.crn.g as f64).ln() as f128;
+        // We *do* need precision for ln(g), because it is being multiplied by large values.
+        // It's only used if g > 0.
+        let ln_g = if self.crn.g > 0 {
+            ln_f128(self.crn.g as f128)
+        } else {
+            f128::NAN
+        };
         let ln_gamma_diff =
             ln_gamma_manual_high_precision((self.n_including_extra_species + 1 - r) as f128);
         // lhs tracks all of the terms that don't include t, i.e., those that we don't need to
         // update each iteration of binary search.
+
         lhs += ln_gamma_diff;
         if lhs.is_nan() {
             println!("Moment 1");
             println!("input: {:?}", self.n_including_extra_species + 1 - r)
         }
         lhs -= ln_u;
-        // if lhs == ln_gamma_diff {
-        //     // TODO: this is a temporary hack/fix for the case where population size blows up.
-        //     println!("Uh oh! u, ln_gamma_diff: {:?}, {:?}", u, ln_gamma_diff);
-        //     return 1;
-        // }
 
         if self.crn.g > 0 {
             for j in 0..self.crn.o {
@@ -1512,7 +1513,6 @@ impl SimulatorCRNMultiBatch {
                 lhs += ln_gamma_manual_high_precision(
                     ((self.n_including_extra_species - j as u64) as f128) / (self.crn.g as f128),
                 );
-
                 lhs -= ln_gamma_small_rational(
                     (self.n_including_extra_species
                         - (num_static_terms * self.crn.g as u64)
@@ -1535,8 +1535,12 @@ impl SimulatorCRNMultiBatch {
         // We can get away with low-precision calls until LHS and RHS are so close that we need
         // the higher precision offered by it.
         let mut use_high_precision_in_loop: bool = false;
-
-        // We maintain the invariant that P(l >= t_lo) >= u and P(l >= t_hi) < u
+        // We maintain the invariant that P(l >= t_lo) >= u and P(l >= t_hi) < u.
+        // It would be good to jump start this search since the first many iterations will
+        // "always" go one direction, because we're going to land at O(sqrt(t_hi)) on average.
+        // TODO: do this, but it's not *as* important as other things right now because
+        // the loop iterations we'd manage to skip are going to be ones where we don't need
+        // high precision arithmetic, so they're not the bottleneck at high pop size anyway.
         while t_lo < t_hi - 1 {
             let t_mid = (t_lo + t_hi) / 2;
             // rhs tracks all of the terms that include t, i.e., those that we need to
@@ -1611,25 +1615,40 @@ impl SimulatorCRNMultiBatch {
             // ln(u) might be smaller than the lowest-precision part of lhs and rhs. For example
             // if u = 1 - 10^-7, then ln(u) is around 10^-7, but at population size 10^9 the
             // order of magnitude of floating point error in lhs and rhs is greater than this.
-            // println!(
-            //     "LHS: {:?}, RHS: {:?}",
-            //     f128_to_decimal(lhs),
-            //     f128_to_decimal(rhs)
-            // );
             assert!(!lhs.is_nan() && !rhs.is_nan());
             // If the calculation of whether rhs or lhs might depend on f128-level precision
             // for the ln_gamma calculation, we need to start using it (including in the iteration
             // we just tried to compute).
             // There are self.crn.o calls to lngamma in each loop iteration, and each of them
             // might be wrong by around the magnitude of the computed value times epsilon.
-            // Also gonna throw in a 1.5 to be safer.
-            if !use_high_precision_in_loop
-                && (lhs - rhs).abs()
-                    < (last_lngamma_value * 1.5 * self.crn.o as f64 * f64::EPSILON) as f128
-            {
+            // Also gonna throw in a 2.5 to be safer, as 1.5 still encountered the bug.
+            let potential_error = (last_lngamma_value * 2.5 * self.crn.o as f64) * f64::EPSILON;
+            if !use_high_precision_in_loop && (lhs - rhs).abs() < potential_error as f128 {
                 use_high_precision_in_loop = true;
                 continue;
             }
+            // If lhs + ln_u <= rhs, this implies there's *no* value of u that could have changed
+            // the outcome of this binary search step.
+            // There's only one time this makes sense: if we're in the *last step* of the search,
+            // where t_mid = 1, and we are sampling a batch of size exactly 1 reaction.
+
+            // In all cases, the expression rhs - (lhs + ln_u) gives the probability that
+            // a batch would have size smaller than t_mid. So whenever t_mid > 1, this
+            // value should be positive.
+            assert!(
+                lhs + ln_u <= rhs || (t_mid == 1),
+                "lhs + ln(u) should always be less than rhs, except in the last iteration.
+                lhs + ln(u) and rhs: {:?}, {:?}. Potential error: {:?}. Diff: {:?}.
+                t_mid: {:?}. n = {:?}.
+                This may indicate a floating point precision bug.",
+                f128_to_decimal(lhs + ln_u),
+                f128_to_decimal(rhs),
+                potential_error,
+                f128_to_decimal((lhs - rhs).abs()),
+                t_mid,
+                self.n,
+            );
+
             if lhs < rhs {
                 t_hi = t_mid;
             } else {
@@ -1639,12 +1658,11 @@ impl SimulatorCRNMultiBatch {
 
         // Return t_lo instead of t_hi (which simulator_pp_multibatch returns) because the CDF here
         // is written in terms of p(l >= t) instead of p(l > t).
-
-        // TODO: this is a duct tape fix for the returning 0 bug
-        if t_lo == 0 {
-            println!("The bug has come! u was {:?}", u);
-            return 1;
-        }
+        assert!(
+            t_lo > 0,
+            "Binary search should never return t_lo = 0.
+            This may indicate a floating-point precision bug."
+        );
 
         t_lo
     }
@@ -1792,7 +1810,7 @@ impl SimulatorCRNMultiBatch {
 
         // TODO: this is a duct tape fix for the returning 0 bug
         if t_lo == 0 {
-            println!("The bug has come! u was {:?}", u);
+            // println!("The bug has come! u was {:?}", u);
             return 1;
         }
 
