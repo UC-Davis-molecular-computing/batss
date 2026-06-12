@@ -40,12 +40,12 @@ type Reaction = (StateList, StateList, RateConstant);
 type ProductsAndRateConstant = (StateList, RateConstant);
 // A map from each state that appears to how many times that state appears in this set of reactants.
 
-// We remember the CRN we started with, because we may need to recompute reaction
-// probabilities between batches if we change the count of K. This should also hopefully
-// make it easier to interface with the Simulator class from both python and rust.
-// This struct is named to emphasize that it stores the CRN *after* the uniform transformation
-// is applied (so all reactions should have equal order and equal generativity). Rate constants
-// are stored here *before* adjusting for the count of K.
+/// Remembers the CRN we started with, because we may need to recompute reaction
+/// probabilities between batches if we change the count of K. This should also hopefully
+/// make it easier to interface with the Simulator class from both python and rust.
+/// This struct is named to emphasize that it stores the CRN *after* the uniform transformation
+/// is applied (so all reactions should have equal order and equal generativity). Rate constants
+/// are stored here *before* adjusting for the count of K.
 pub struct UniformCRN {
     // Reaction order.
     pub o: usize,
@@ -64,7 +64,7 @@ pub struct UniformCRN {
     pub continuous_time_correction_factor: f64,
 }
 
-// A struct combining all reactions with the same reactants into a single piece.
+/// A struct combining all reactions with the same reactants into a single piece.
 #[derive(Debug)]
 pub struct CombinedReactions {
     pub reactants: StateList,
