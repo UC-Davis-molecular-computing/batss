@@ -126,7 +126,7 @@ def make_and_save_plot(pop_exponent: int) -> None:
     # figLegend.savefig(f'data/lotka_volterra_counts_time20_legend.pdf', format='pdf', bbox_inches='tight')
 
 
-def plot_null_reactions(pop_exponent: int, seed: int) -> None:
+def plot_passive_reactions(pop_exponent: int, seed: int) -> None:
     figsize = (12, 6)
     n = int(10**pop_exponent)
     p = 0.5
@@ -152,10 +152,10 @@ def plot_null_reactions(pop_exponent: int, seed: int) -> None:
     # total steps starts with 0 (and for some reason ends with 0, I don't get that),
     # so we slice it to remove the first and last element to avoid dividing by zero.
     total_steps = np.array(sim.discrete_steps_total_last_run)[1:-1]
-    non_null_steps = np.array(sim.discrete_steps_no_nulls_last_run)[1:-1]
-    null_steps = total_steps - non_null_steps
-    null_fractions = null_steps / total_steps
-    times = sim.history.index.tolist()[1:-1]  # make same length as null_fractions
+    non_passive_steps = np.array(sim.discrete_steps_no_passives_last_run)[1:-1]
+    passive_steps = total_steps - non_passive_steps
+    passive_fractions = passive_steps / total_steps
+    times = sim.history.index.tolist()[1:-1]  # make same length as passive_fractions
 
     f, ax = plt.subplots(figsize=figsize)
 
@@ -170,8 +170,8 @@ def plot_null_reactions(pop_exponent: int, seed: int) -> None:
     # Create a second y-axis that shares the same x-axis
     ax2 = ax.twinx()
 
-    # Plot null_fractions on the second y-axis
-    ax2.plot(times, null_fractions, label="passive", color=red)
+    # Plot passive_fractions on the second y-axis
+    ax2.plot(times, passive_fractions, label="passive", color=red)
 
     # Set up the right y-axis
     ax2.set_ylabel("fraction of passive reactions")
@@ -189,4 +189,4 @@ if __name__ == "__main__":
     main()
     # pop_exponent = 8
     # seed = 1
-    # plot_null_reactions(pop_exponent, seed)
+    # plot_passive_reactions(pop_exponent, seed)

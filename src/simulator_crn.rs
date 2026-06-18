@@ -163,7 +163,7 @@ impl UniformCRN {
             // The batching algorithm needs to know how much continuous time one step corresponds to.
             // This function is doing the calculation that can determine this.
             // When batching, the reactant set with the highest total rate constant always causes a
-            // non-null reaction when chosen, and the number of ways to choose it is equal to
+            // non-passive reaction when chosen, and the number of ways to choose it is equal to
             // its propensity times its symmetry degree.
             // The missing factor to convert between the expected time to this reaction in the
             // original CRN and the batching CRN is the total rate constant.
@@ -183,7 +183,7 @@ impl UniformCRN {
         let mut random_transitions = ArrayD::<usize>::zeros(shape_vec);
         let mut random_outputs: Vec<Vec<State>> = Vec::new();
         let mut random_probabilities: Vec<f64> = Vec::new();
-        // Add any non-null reactions. Null reactions don't need any special handling.
+        // Add any non-passive reactions. Passive reactions don't need any special handling.
         let mut cur_output_index = 0;
         flame::start("construct_transition_arrays: second reaction loop");
         for reaction in &self.reactions {
@@ -271,12 +271,12 @@ pub struct SimulatorCRNMultiBatch {
     pub continuous_time: f64,
 
     /// The current number of elapsed interaction steps that actually simulated something in
-    /// the original CRN, rather than being a "null reaction",
+    /// the original CRN, rather than being a passive reaction,
     /// since the Simulator was created.
     #[pyo3(get, set)]
-    pub discrete_steps_no_nulls: u64,
+    pub discrete_steps_no_passives: u64,
 
-    /// The current number of elapsed interaction steps in this CRN, including null reactions,
+    /// The current number of elapsed interaction steps in this CRN, including passive reactions,
     /// since the Simulator was created.
     #[pyo3(get, set)]
     pub discrete_steps_total: u64,
@@ -284,9 +284,9 @@ pub struct SimulatorCRNMultiBatch {
     /// The total number of states (length of urn.config),
     /// in the most recent call to run.
     #[pyo3(get, set)]
-    pub discrete_steps_no_nulls_last_run: u64,
+    pub discrete_steps_no_passives_last_run: u64,
 
-    /// The number of elapsed interaction steps in this CRN, including null reactions,
+    /// The number of elapsed interaction steps in this CRN, including passive reactions,
     /// in the most recent call to run.
     #[pyo3(get, set)]
     pub discrete_steps_total_last_run: u64,
@@ -296,9 +296,9 @@ pub struct SimulatorCRNMultiBatch {
 
     /// An (o + 1)-dimensional array. The first o dimensions represent reactants. After indexing through
     /// the first o dimensions, the last dimension always has size two, with elements (`num_outputs`, `first_idx`).
-    /// `num_outputs` is the number of possible outputs if transition i,j --> ... is non-null,
+    /// `num_outputs` is the number of possible outputs if transition i,j --> ... is non-passive,
     /// otherwise it is 0. `first_idx` gives the starting index to find
-    /// the outputs in the array `self.random_outputs` if it is non-null.
+    /// the outputs in the array `self.random_outputs` if it is non-passive.
     /// TODO: it would be much, much more readable if this was o-dimensional of pairs,
     /// rather than (o+1)-dimensional.
     /// #[pyo3(get, set)] // XXX: for testing
@@ -319,7 +319,7 @@ pub struct SimulatorCRNMultiBatch {
 
     /// An array containing all random transition probabilities,
     /// whose indexing matches random_outputs.
-    /// May add up to less than 1 for a given reaction, in which case the remainder is assumed null.
+    /// May add up to less than 1 for a given reaction, in which case the remainder is assumed passive.
     #[pyo3(get, set)] // XXX: for testing
     pub transition_probabilities: Vec<f64>,
 
@@ -355,7 +355,7 @@ pub struct SimulatorCRNMultiBatch {
     #[pyo3(get, set)]
     pub do_gillespie: bool,
 
-    /// A boolean determining if the configuration is silent (all interactions are null).
+    /// A boolean determining if the configuration is silent (all interactions are passive).
     #[pyo3(get, set)]
     pub silent: bool,
 
@@ -375,8 +375,8 @@ impl SimulatorCRNMultiBatch {
     ///         Delta[i, j] gives contains the two output states.
     ///     random_transitions: A q^o x 2 array. That is, it has o+1 dimensions, all but the last have length q,
     ///         and the last dimension always has length two.
-    ///         Entry [r, 0] is the number of possible outputs if transition on reactant set r is non-null,
-    ///         otherwise it is 0. Entry [r, 1] gives the starting index to find the outputs in the array random_outputs if it is non-null.
+    ///         Entry [r, 0] is the number of possible outputs if transition on reactant set r is non-passive,
+    ///         otherwise it is 0. Entry [r, 1] gives the starting index to find the outputs in the array random_outputs if it is non-passive.
     ///     random_outputs: A ? x (o + g) array containing all outputs of random transitions,
     ///         whose indexing information is contained in random_transitions.
     ///     transition_probabilities: A 1D length-? array containing all random transition probabilities,
@@ -412,9 +412,9 @@ impl SimulatorCRNMultiBatch {
             .fold(0, |acc, x| acc.max(x));
 
         let continuous_time = 0.0;
-        let discrete_steps_no_nulls = 0;
+        let discrete_steps_no_passives = 0;
         let discrete_steps_total = 0;
-        let discrete_steps_no_nulls_last_run = 0;
+        let discrete_steps_no_passives_last_run = 0;
         let discrete_steps_total_last_run = 0;
         let rng = if let Some(s) = seed {
             SmallRng::seed_from_u64(s)
@@ -426,7 +426,7 @@ impl SimulatorCRNMultiBatch {
         let urn = Urn::new(config.clone(), seed);
         let array_sums = make_batch_result(crn.o, q);
         let row = vec![0; q];
-        // The +1 here is to sample how many reactions are null.
+        // The +1 here is to sample how many reactions are passive.
         let m = vec![0; random_depth + 1];
         let silent = false;
         let do_gillespie = false; // this changes during run
@@ -467,9 +467,9 @@ impl SimulatorCRNMultiBatch {
             n,
             n_including_extra_species,
             continuous_time,
-            discrete_steps_no_nulls,
+            discrete_steps_no_passives,
             discrete_steps_total,
-            discrete_steps_no_nulls_last_run,
+            discrete_steps_no_passives_last_run,
             discrete_steps_total_last_run,
             q,
             random_transitions,
@@ -502,7 +502,7 @@ impl SimulatorCRNMultiBatch {
     /// Run the simulation for a specified number of steps or until max time is reached
     #[pyo3(signature = (t_max, max_wallclock_time=3600.0))]
     pub fn run(&mut self, t_max: f64, max_wallclock_time: f64) -> PyResult<()> {
-        self.discrete_steps_no_nulls_last_run = 0;
+        self.discrete_steps_no_passives_last_run = 0;
         self.discrete_steps_total_last_run = 0;
         if self.silent {
             return Err(PyValueError::new_err("Simulation is silent; cannot run."));
@@ -565,9 +565,9 @@ impl SimulatorCRNMultiBatch {
         }
         self.n_including_extra_species = self.n + self.urn.config[self.crn.k];
         self.continuous_time = t;
-        self.discrete_steps_no_nulls = 0;
+        self.discrete_steps_no_passives = 0;
         self.discrete_steps_total = 0;
-        self.discrete_steps_no_nulls_last_run = 0;
+        self.discrete_steps_no_passives_last_run = 0;
         self.discrete_steps_total_last_run = 0;
         self.silent = self.n == 0;
         Ok(())
@@ -710,9 +710,9 @@ impl SimulatorCRNMultiBatch {
                 // Still might have some probability of being passive.
                 let probabilities =
                     self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
-                let non_null_probability_sum: f64 = probabilities.iter().sum();
-                total_non_passive_mass += non_null_probability_sum;
-                total_passive_mass += 1.0 - non_null_probability_sum;
+                let non_passive_probability_sum: f64 = probabilities.iter().sum();
+                total_non_passive_mass += non_passive_probability_sum;
+                total_passive_mass += 1.0 - non_passive_probability_sum;
             }
         }
         let total_mass = total_passive_mass + total_non_passive_mass;
@@ -994,7 +994,7 @@ impl SimulatorCRNMultiBatch {
             .sample_batch_result(rxns_before_coll, &mut self.urn);
         flame::end("sample batch");
 
-        let initial_t_including_nulls = self.discrete_steps_total;
+        let initial_t_including_passives = self.discrete_steps_total;
         flame::start("process batch");
         let mut done = false;
         let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
@@ -1024,24 +1024,24 @@ impl SimulatorCRNMultiBatch {
             // helper method in rust because of the immutable borrow of self above.
             flame::end("pre-reaction-checking");
             if num_outputs == 0 {
-                flame::start("null reaction");
-                // Null reaction. Move the reactants from self.urn to self.updated_counts (for collision sampling), and add W.
+                flame::start("passive reaction");
+                // Passive reaction. Move the reactants from self.urn to self.updated_counts (for collision sampling), and add W.
                 for reactant in reactants {
                     self.updated_counts.add_to_entry(reactant, quantity as i64);
                 }
                 self.updated_counts
                     .add_to_entry(self.crn.w, (quantity * self.crn.g as u64) as i64);
-                flame::end("null reaction");
+                flame::end("passive reaction");
             } else {
-                flame::start("non-null reaction");
-                // We'll add this for now, then subtract off the probabilistically null reactions later.
-                self.discrete_steps_no_nulls += quantity;
-                self.discrete_steps_no_nulls_last_run += quantity;
+                flame::start("non-passive reaction");
+                // We'll add this for now, then subtract off the probabilistically passive reactions later.
+                self.discrete_steps_no_passives += quantity;
+                self.discrete_steps_no_passives_last_run += quantity;
                 let mut probabilities =
                     self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
-                let non_null_probability_sum: f64 = probabilities.iter().sum();
-                if non_null_probability_sum < 1.0 {
-                    probabilities.push(1.0 - non_null_probability_sum);
+                let non_passive_probability_sum: f64 = probabilities.iter().sum();
+                if non_passive_probability_sum < 1.0 {
+                    probabilities.push(1.0 - non_passive_probability_sum);
                 }
                 flame::start("multinomial sample");
                 multinomial_sample(
@@ -1064,19 +1064,19 @@ impl SimulatorCRNMultiBatch {
                             .add_to_entry(*output, self.m[offset] as i64);
                     }
                 }
-                // Add any W produced by null reactions, and add those reactants to updated_counts.
-                if non_null_probability_sum < 1.0 {
-                    let null_count = self.m[num_outputs];
+                // Add any W produced by passive reactions, and add those reactants to updated_counts.
+                if non_passive_probability_sum < 1.0 {
+                    let passive_count = self.m[num_outputs];
                     self.updated_counts
-                        .add_to_entry(self.crn.w, (null_count * self.crn.g as u64) as i64);
+                        .add_to_entry(self.crn.w, (passive_count * self.crn.g as u64) as i64);
                     for reactant in reactants {
                         self.updated_counts
-                            .add_to_entry(reactant, null_count as i64);
+                            .add_to_entry(reactant, passive_count as i64);
                     }
-                    self.discrete_steps_no_nulls -= null_count;
-                    self.discrete_steps_no_nulls_last_run -= null_count;
+                    self.discrete_steps_no_passives -= passive_count;
+                    self.discrete_steps_no_passives_last_run -= passive_count;
                 }
-                flame::end("non-null reaction");
+                flame::end("non-passive reaction");
             }
             assert_eq!(
                 quantity * (self.crn.o + self.crn.g) as u64,
@@ -1174,20 +1174,20 @@ impl SimulatorCRNMultiBatch {
             let (num_outputs, first_idx) = (view[0], view[1]);
             // TODO: this code is heavily copy-pasted. See other TODO comment above.
             if num_outputs == 0 {
-                // Null reaction.
+                // Passive reaction.
                 for reactant in collision {
                     self.updated_counts.add_to_entry(reactant, 1);
                 }
                 self.updated_counts
                     .add_to_entry(self.crn.w, (self.crn.g) as i64);
             } else {
-                self.discrete_steps_no_nulls += 1;
-                self.discrete_steps_no_nulls_last_run += 1;
+                self.discrete_steps_no_passives += 1;
+                self.discrete_steps_no_passives_last_run += 1;
                 let mut probabilities =
                     self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
-                let non_null_probability_sum: f64 = probabilities.iter().sum();
-                if non_null_probability_sum < 1.0 {
-                    probabilities.push(1.0 - non_null_probability_sum);
+                let non_passive_probability_sum: f64 = probabilities.iter().sum();
+                if non_passive_probability_sum < 1.0 {
+                    probabilities.push(1.0 - non_passive_probability_sum);
                 }
                 flame::start("multinomial sample");
                 multinomial_sample(
@@ -1209,17 +1209,17 @@ impl SimulatorCRNMultiBatch {
                         self.updated_counts.add_to_entry(*offset, self.m[c] as i64);
                     }
                 }
-                // Add W if the collision was a probabilistic null reaction.
-                if non_null_probability_sum < 1.0 {
-                    let null_count = self.m[num_outputs];
+                // Add W if the collision was a probabilistic passive reaction.
+                if non_passive_probability_sum < 1.0 {
+                    let passive_count = self.m[num_outputs];
                     self.updated_counts
-                        .add_to_entry(self.crn.w, (null_count * self.crn.g as u64) as i64);
+                        .add_to_entry(self.crn.w, (passive_count * self.crn.g as u64) as i64);
                     for reactant in collision {
                         self.updated_counts
-                            .add_to_entry(reactant, null_count as i64);
+                            .add_to_entry(reactant, passive_count as i64);
                     }
-                    self.discrete_steps_no_nulls -= null_count;
-                    self.discrete_steps_no_nulls_last_run -= null_count;
+                    self.discrete_steps_no_passives -= passive_count;
+                    self.discrete_steps_no_passives_last_run -= passive_count;
                 }
             }
             assert_eq!(
@@ -1241,7 +1241,7 @@ impl SimulatorCRNMultiBatch {
         // Check that we added the right number of things to the urn.
         assert_eq!(
             self.urn.size - self.n_including_extra_species,
-            (self.discrete_steps_total - initial_t_including_nulls) * self.crn.g as u64,
+            (self.discrete_steps_total - initial_t_including_passives) * self.crn.g as u64,
             "Inconsistency between number of reactions simulated and population size change."
         );
         assert_eq!(
@@ -1257,7 +1257,7 @@ impl SimulatorCRNMultiBatch {
     }
 
     /// Perform a Gillespie step.
-    /// Samples the time until the next non-null interaction and updates.
+    /// Samples the time until the next non-passive interaction and updates.
     /// Args:
     /// num_steps:
     ///     If positive, the maximum value of :any:`t` that will be reached.
@@ -1314,7 +1314,7 @@ impl SimulatorCRNMultiBatch {
     }
 
     /// Updates propensity vector, and returns total propensity:
-    /// the probability the next interaction is non-null.
+    /// the probability the next interaction is non-passive.
     // fn get_total_propensity(&mut self) -> f64 {
     //     unimplemented!()
     //     // let mut total_propensity = 0.0;

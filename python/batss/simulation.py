@@ -140,13 +140,13 @@ class Simulation:
     :meth:`Simulation.simulator.run`.
     """
 
-    discrete_steps_no_nulls: list[int]
+    discrete_steps_no_passives: list[int]
     """
     Parallel to self.times and self.configs, this is how many total steps were taken up to that time,
     NOT including steps that simulated passive reactions. Cumulative list similarly to self.discrete_steps_total.
     """
 
-    discrete_steps_no_nulls_last_run: list[int]
+    discrete_steps_no_passives_last_run: list[int]
     """
     Like :data:`Simulation.discrete_steps_total`, but only since the last call to 
     :meth:`Simulation.simulator.run`.
@@ -227,7 +227,7 @@ class Simulation:
                 For a probabilistic transition function, the output is a dictionary
                 mapping tuples of states to probabilities. Inputs that are not present
                 in the dictionary, or return None from the function, are interpreted as
-                null transitions that return the same pair of states as the output.
+                passive transitions that return the same pair of states as the output.
                 The third option is a list of :class:`ppsim.crn.Reaction` objects describing a CRN,
                 which will be parsed into an equivalent population protocol.
             
@@ -255,18 +255,18 @@ class Simulation:
 
                 ``'asymmetric'``:
                     Ordering of the inputs matters, and all inputs not
-                    explicitly given as assumed to be null interactions.
+                    explicitly given as assumed to be passive interactions.
 
                 ``'symmetric'``:
                     The input pairs are interpreted as unordered. If rule(a, b)
-                    returns None, while rule(b, a) has a non-null output, then the
+                    returns None, while rule(b, a) has a non-passive output, then the
                     output of rule(a, b) is assumed to be the same as rule(b, a).
                     If rule(a, b) and rule(b, a) are each given, there is no effect.
                     Asymmetric interactions can be explicitly included this way.
 
                 ``'symmetric_enforced'``:
                     The same as symmetric, except that if rule(a, b)
-                    and rule(b, a) are non-null and do not give the same set of outputs,
+                    and rule(b, a) are non-passive and do not give the same set of outputs,
                     a ValueError is raised.
             
             seed: An optional integer used as the seed for all pseudorandom number
@@ -303,8 +303,8 @@ class Simulation:
         """
         self.discrete_steps_total = []
         self.discrete_steps_total_last_run = []
-        self.discrete_steps_no_nulls = []
-        self.discrete_steps_no_nulls_last_run = []
+        self.discrete_steps_no_passives = []
+        self.discrete_steps_no_passives_last_run = []
         self.simulator_method = simulator_method
         self.seed = seed
         self.rng = np.random.default_rng(seed)
@@ -452,7 +452,7 @@ class Simulation:
         reactions = None
         k_state = None
         w_state = None
-        null_transitions = None
+        passive_transitions = None
         random_transitions = None
         random_outputs = None # type: ignore
         random_outputs_arr = None
@@ -463,7 +463,7 @@ class Simulation:
             w_state = self.state_list.index(waste_specie())
         else:
             delta = np.zeros((q, q, 2), dtype=np.uint)
-            null_transitions = np.zeros((q, q), dtype=np.bool_)
+            passive_transitions = np.zeros((q, q), dtype=np.bool_)
             random_transitions = np.zeros((q, q, 2), dtype=np.uint)
             random_outputs: list[tuple[State, State]] = []
             transition_probabilities = []
@@ -491,7 +491,7 @@ class Simulation:
                                 random_outputs.append((self.state_dict[x], self.state_dict[y]))
                             transition_probabilities.extend(list(output.values()))
                     if set(output) == {a, b}:
-                        null_transitions[i, j] = True
+                        passive_transitions[i, j] = True
                         delta[i, j] = (i, j)
                     elif isinstance(output, tuple):
                         delta[i, j] = (self.state_dict[output[0]], self.state_dict[output[1]])
@@ -506,14 +506,14 @@ class Simulation:
             if self._transition_order.lower() in ['symmetric', 'symmetric_enforced']:
                 for i in range(q):
                     for j in range(q):
-                        # Set the output for i, j to be equal to j, i if null
-                        if null_transitions[i, j]:
-                            null_transitions[i, j] = null_transitions[j, i]
+                        # Set the output for i, j to be equal to j, i if passive
+                        if passive_transitions[i, j]:
+                            passive_transitions[i, j] = passive_transitions[j, i]
                             delta[i, j] = delta[j, i]
                             random_transitions[i, j] = random_transitions[j, i]
-                        # If i, j and j, i are both non-null, with symmetric_enforced, check outputs are equal
+                        # If i, j and j, i are both non-passive, with symmetric_enforced, check outputs are equal
                         elif self._transition_order.lower() == 'symmetric_enforced' \
-                                and not null_transitions[j, i]:
+                                and not passive_transitions[j, i]:
                             if sorted(delta[i, j]) != sorted(delta[j, i]) or \
                                     random_transitions[i, j, 0] != random_transitions[j, i, 0]:
                                 a, b = self.state_list[i], self.state_list[j]
@@ -569,7 +569,7 @@ class Simulation:
                 mapping a configuration (as a dictionary mapping states to counts) to a
                 boolean. The run will stop when the function returns True.
                 Defaults to None. If None, the simulation will run until the configuration
-                is silent (all transitions are null). This only works with the multibatch
+                is silent (all transitions are passive). This only works with the multibatch
                 simulator method, if another simulator method is given, then using None will
                 raise a ValueError.
             
@@ -696,7 +696,7 @@ class Simulation:
     @property
     def reactions(self) -> str:
         """
-        A string showing all non-null transitions in reaction notation.
+        A string showing all non-passive transitions in reaction notation.
 
         Each reaction is separated by newlines, so that ``print(self.reactions)`` will display all reactions.
         Only works with simulator method multibatch, otherwise will raise a ValueError.
@@ -709,7 +709,7 @@ class Simulation:
     @property
     def enabled_reactions(self) -> str:
         """
-        A string showing all non-null transitions that are currently enabled.
+        A string showing all non-passive transitions that are currently enabled.
 
         This can only check the current configuration in self.simulator.
         Each reaction is separated by newlines, so that ``print(self.enabled_reactions)``
@@ -824,8 +824,8 @@ class Simulation:
         return self._history
 
     @property
-    def null_probability(self) -> float:
-        """The probability the next interaction is null."""
+    def passive_probability(self) -> float:
+        """The probability the next interaction is passive."""
         self.simulator.get_enabled_reactions()
         n = self.simulator.n
         return 1 - self.simulator.get_total_propensity() / (n * (n - 1) / 2)
@@ -848,10 +848,10 @@ class Simulation:
         self.times.append(self.time)
 
         self.discrete_steps_total.append(self.simulator.discrete_steps_total)
-        self.discrete_steps_no_nulls.append( self.simulator.discrete_steps_no_nulls)
+        self.discrete_steps_no_passives.append( self.simulator.discrete_steps_no_passives)
 
         self.discrete_steps_total_last_run.append(self.simulator.discrete_steps_total_last_run)
-        self.discrete_steps_no_nulls_last_run.append( self.simulator.discrete_steps_no_nulls_last_run)
+        self.discrete_steps_no_passives_last_run.append( self.simulator.discrete_steps_no_passives_last_run)
 
     def set_snapshot_time(self, time: float) -> None:
         """Updates all snapshots to the nearest recorded configuration to a specified time.
@@ -978,7 +978,7 @@ def time_trials(
             (mapping states to counts)
             as input and returns True if that configuration has converged.
             Defaults to None. If None, the simulation will run until silent
-            (all transitions are null), and the data will be for silence time.
+            (all transitions are passive), and the data will be for silence time.
         convergence_check_interval: How often (in parallel time) the simulation will
             run between convergence checks. Defaults to 0.1.
             Smaller values give better resolution, but spend more time checking for
