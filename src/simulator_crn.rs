@@ -294,6 +294,7 @@ pub struct SimulatorCRNMultiBatch {
     pub discrete_steps_total_last_run: u64,
 
     /// The total number of states (length of urn.config).
+    /// Includes the auxiliary species K and W.
     pub q: usize,
 
     /// An (o + 1)-dimensional array. The first o dimensions represent reactants. After indexing through
