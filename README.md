@@ -32,9 +32,11 @@ pip install batss
 
 We will show how to simulate the Lotka-Volterra oscillator,
 
-$$R + F \to F + F,\\
-R \to 2R,\\
-F \to \emptyset,$$
+$$\begin{aligned}
+R &\to 2R,\\
+R + F &\to 2F,\\
+F &\to \emptyset,
+\end{aligned}$$
 
 with all rate constants 1.
 

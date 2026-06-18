@@ -19,36 +19,37 @@ if False:
     sys.meta_path.insert(0, CustomPydFinder)
 
 
+import batss as bt
 
-import batss as pp
 
 def main():
-
     make_and_save_plot(3)
-    
+
+
 def make_and_save_plot(pop_exponent: int) -> None:
     seed = 4
-    n = int(10 ** pop_exponent)
+    n = int(10**pop_exponent)
     p = 0.5
     r_init = int(n * p)
     f_init = n - r_init
-    inits = {'R': r_init, 'F': f_init}
+    inits = {"R": r_init, "F": f_init}
     end_time = 20.0
     num_samples = 10**3
-    print('done with rebop')
+    print("done with rebop")
 
-    r,f = pp.species('R F')
+    r, f = bt.species("R F")
     rxns = [
-        (r+f >> 2*f).k(1),
-        (r >> 2*r).k(1),
+        (r + f >> 2 * f).k(1),
+        (r >> 2 * r).k(1),
         (f >> None).k(1),
     ]
-    
-    inits = {r: r_init, f: f_init}
-    sim = pp.Simulation(inits, rxns, simulator_method="crn", continuous_time=True, seed=seed)
 
-    print(f'running ppsim with n = 10^{pop_exponent}')
+    inits = {r: r_init, f: f_init}
+    sim = bt.Simulation(inits, rxns, simulator_method="crn", continuous_time=True, seed=seed)
+
+    print(f"running ppsim with n = 10^{pop_exponent}")
     sim.run(end_time, end_time / num_samples)
+
 
 if __name__ == "__main__":
     main()
