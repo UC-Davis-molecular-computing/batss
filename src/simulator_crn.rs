@@ -64,7 +64,7 @@ pub struct UniformCRN {
     pub continuous_time_correction_factor: f64,
 }
 
-/// A struct combining all reactions with the same reactants into a single piece.
+/// A struct combining all reactions with the same reactants into a single place.
 #[derive(Debug)]
 pub struct CombinedReactions {
     pub reactants: StateList,
@@ -127,10 +127,11 @@ impl UniformCRN {
             continuous_time_correction_factor: 1.0,
         };
     }
-    // Build or rebuild random_transitions, random_outputs, and transition_probabilities.
-    // We need to rebuild these tables because reaction propensities depend on the count of K,
-    // which we may want to change throughout the execution.
-    // Returns a tuple of these three objects in that order.
+    /// Build or rebuild random_transitions, random_outputs, and transition_probabilities
+    /// for a @SimulatorCRNMultiBatch.
+    /// We need to rebuild these tables because reaction propensities depend on the count of K,
+    /// which we may want to change throughout the execution.
+    /// Returns a tuple of these three objects in that order.
     fn construct_transition_arrays(
         &mut self,
         k_count: u64,
@@ -145,12 +146,12 @@ impl UniformCRN {
             let reactants = &reaction.reactants;
             let symmetry_degree = Self::symmetry_degree(reactants);
             let k_count_correction_factor = self.k_count_correction_factor(reactants, k_count);
-            // We artificially speed up any reaction with K in it.
+            // By adding K as a reactant, we artificially speed up any reaction with K in it.
             // We also artificially speed up any reaction that can have its reactants written in
-            // many different orders (i.e., with many distinct reactions) because there are
-            // many ways for the batching algorithm to pick its reactants, so we effectively
-            // slow down any reaction with many equivalent orderings.
-            // We correct for those here.
+            // many different orders (i.e., with many distinct reactants) because the batching
+            // algorithm chooses reactants one at a time, so e.g. there are twice as many ways
+            // to choose an 'A' and a 'B' compared to an 'A' and an 'A', as either could be first.
+            // We correct for those factors here.
             let artificial_speedup_factor: f64 =
                 k_count_correction_factor as f64 / symmetry_degree as f64;
             let mut total_rate_constant = 0.0;
@@ -171,7 +172,6 @@ impl UniformCRN {
             if total_adjusted_rate_constant > max_total_adjusted_rate_constant {
                 max_total_adjusted_rate_constant = total_adjusted_rate_constant;
                 self.continuous_time_correction_factor = total_adjusted_rate_constant;
-                // println!("CTCF is {:?}", self.continuous_time_correction_factor);
             }
         }
         flame::end("construct_transition_arrays: first reaction loop");
@@ -219,10 +219,6 @@ impl UniformCRN {
             "random_outputs and transition_probabilities length mismatch"
         );
         flame::end("construct_transition_arrays");
-        // println!(
-        //     "Arrays are {:?}, {:?}, {:?}",
-        //     random_transitions, random_outputs, random_probabilities
-        // );
         return (random_transitions, random_outputs, random_probabilities);
     }
 
@@ -237,9 +233,9 @@ impl UniformCRN {
         return correction_factor;
     }
 
-    // Determine the degree of symmetry of a reaction, i.e., for any given ordering of its reactants,
-    // the number of reorderings that are redundant. Obtained as the product of the factorial of
-    // the count of each reactant.
+    /// Determine the degree of symmetry of a reaction, i.e., for any given ordering of its reactants,
+    /// the number of reorderings that are redundant. Obtained as the product of the factorial of
+    /// the count of each reactant.
     fn symmetry_degree(reactants: &Vec<State>) -> u64 {
         let mut factor = 1;
         let mut frequencies: HashMap<State, u64> = HashMap::new();
@@ -1840,10 +1836,6 @@ impl SimulatorCRNMultiBatch {
         let mut done_reactions_at_checkpoint = 0;
         let mut pop_size_at_checkpoint = self.n_including_extra_species;
         let mut ran_over_end_time: bool = false;
-        // println!(
-        //     "Beginning: {:?}, {:?}, {:?}, {:?}",
-        //     time_at_checkpoint, pop_size_at_checkpoint, t_max, l
-        // );
         // Special case: if l = 1, we know the answer is 0 but the below loop won't realize that,
         // as it never even gets a chance to enter the loop that can set ran_over_end_time to true.
         if l == 1 {
@@ -1887,14 +1879,6 @@ impl SimulatorCRNMultiBatch {
                     current_simulated_population_size += self.crn.g as u64 * halfway_point;
                 }
             }
-            // println!(
-            //     "At iteration: {:?}, {:?}, {:?}, {:?}, {:?}",
-            //     time_at_checkpoint,
-            //     t_max,
-            //     latest_possible_collision_index,
-            //     done_reactions_at_checkpoint,
-            //     l
-            // );
             // If we get here and ran_over_end_time is false, that means we're rejecting a sample.
         }
         return done_reactions_at_checkpoint;
