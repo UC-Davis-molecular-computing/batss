@@ -16,12 +16,14 @@ use pyo3::prelude::*;
 use ndarray::{ArrayD, Axis};
 use pyo3::types::PyNone;
 
-use num_integer::{binomial, Roots};
+use num_integer::binomial;
 use numpy::PyReadonlyArray1;
 use rand::rngs::SmallRng;
 use rand::Rng;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Exp, Gamma, StandardUniform};
+
+use rebop::gillespie::{Gillespie, Rate};
 
 use itertools::Itertools;
 
@@ -355,6 +357,15 @@ pub struct SimulatorCRNMultiBatch {
     #[pyo3(get, set)]
     pub do_gillespie: bool,
 
+    /// A boolean tracking whether we just started doing Gillespie steps.
+    pub just_started_gillespie: bool,
+
+    /// A boolean tracking whether we just stopped doing Gillespie steps.
+    pub just_finished_gillespie: bool,
+
+    /// We use rebop to run the Gillespie algorithm.
+    gillespie: Option<Gillespie>,
+
     /// A boolean determining if the configuration is silent (all interactions are passive).
     #[pyo3(get, set)]
     pub silent: bool,
@@ -429,7 +440,10 @@ impl SimulatorCRNMultiBatch {
         // The +1 here is to sample how many reactions are passive.
         let m = vec![0; random_depth + 1];
         let silent = false;
+        let gillespie = None;
         let do_gillespie = false; // this changes during run
+        let just_started_gillespie = false; // this changes during run
+        let just_finished_gillespie = false; // this changes during run
 
         // next three fields are only used with Gillespie steps;
         // they will be set accordingly if we switch to Gillespie
@@ -483,6 +497,9 @@ impl SimulatorCRNMultiBatch {
             row,
             m,
             do_gillespie,
+            gillespie,
+            just_started_gillespie,
+            just_finished_gillespie,
             silent,
             python_module,
             // gillespie_threshold,
@@ -514,14 +531,52 @@ impl SimulatorCRNMultiBatch {
             if self.silent {
                 return Ok(());
             } else {
-                self.batch_step(t_max);
-                let current_k_count = self.urn.config[self.crn.k];
-                if (current_k_count.min(self.n) as f64) / (current_k_count.max(self.n) as f64)
-                    < K_COUNT_RATIO_THRESHOLD
-                {
-                    self.reset_k_count();
+                if self.do_gillespie {
+                    if self.just_started_gillespie {
+                        // Initialize the Gillespie simulator.
+                        // Doing Gillespie, we may as well operate in the original CRN,
+                        // because it is faithfully simulated.
+                        let mut gillespie_config: Vec<isize> = vec![0; self.q - 2];
+                        let mut species_index = 0;
+                        for i in 0..self.q {
+                            if i == self.crn.k || i == self.crn.w {
+                                continue;
+                            }
+                            gillespie_config[species_index] = self.urn.config[i] as isize;
+                            species_index += 1;
+                        }
+                        // TODO not sure what the false for "sparse" here means.
+                        self.gillespie = Some(Gillespie::new(gillespie_config, false));
+                    }
+
+                    // For now, we're going to assume that we will need to do, say,
+                    // at least O(sqrt n) reactions until it's worth turning on batching again.
+                    // TODO actually do the gillespie algorithm here
+                } else {
+                    if self.just_finished_gillespie {
+                        // We need to load the configuration from gillespie into the urn.
+                        let mut gillespie_config: Vec<u64> = vec![0; self.q];
+                        let mut species_index = 0;
+                        for i in 0..self.q {
+                            if i == self.crn.k || i == self.crn.w {
+                                continue;
+                            }
+                            gillespie_config[i] =
+                                self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
+                            species_index += 1;
+                        }
+                        self.urn.reset_config(&gillespie_config);
+                        self.reset_k_count();
+                    }
+                    self.batch_step(t_max);
+                    let current_k_count = self.urn.config[self.crn.k];
+                    if (current_k_count.min(self.n) as f64) / (current_k_count.max(self.n) as f64)
+                        < K_COUNT_RATIO_THRESHOLD
+                    {
+                        self.reset_k_count();
+                    }
+                    self.recycle_waste();
                 }
-                self.recycle_waste();
             }
             let non_passive_probability = self.non_passive_reaction_probability();
             let rough_expected_reactions_next_batch =
@@ -532,8 +587,23 @@ impl SimulatorCRNMultiBatch {
             // needs to loop over all possible reactions at least,
             // so we'll use the number of reactions as a conservative baseline
             // (that is to say, this will probably be too reticent to use Gillespie)
-            self.do_gillespie =
-                rough_expected_reactions_next_batch < self.crn.reactions.len() as f64;
+            if rough_expected_reactions_next_batch < self.crn.reactions.len() as f64 {
+                if self.do_gillespie {
+                    self.just_started_gillespie = false;
+                } else {
+                    self.do_gillespie = true;
+                    self.just_started_gillespie = true;
+                }
+            } else {
+                if self.do_gillespie {
+                    self.do_gillespie = false;
+                    self.just_finished_gillespie = true;
+                } else {
+                    self.just_finished_gillespie = false;
+                }
+                self.do_gillespie = false;
+                self.just_started_gillespie = false;
+            }
             if non_passive_probability == 0.0 {
                 self.silent = true;
             }
