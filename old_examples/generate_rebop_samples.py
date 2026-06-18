@@ -19,20 +19,20 @@ if False:
     sys.meta_path.insert(0, CustomPydFinder)
 
 
-
-import batss as pp
+import batss as bt
 import gpac as gp
 import polars as pl
 
+
 def main():
-    a, b, u = pp.species('A B U')
+    a, b, u = bt.species("A B U")
     approx_majority = [
         a + b >> 2 * u,
         a + u >> 2 * a,
         b + u >> 2 * b,
     ]
     pop_exponent = 4
-    n = 10 ** pop_exponent
+    n = 10**pop_exponent
     p = 0.51
     a_init = int(n * p)
     b_init = n - a_init
@@ -40,23 +40,24 @@ def main():
     end_time = 5
 
     # We could just write gpac reactions directly, but this is ensuring the gpac_format function works.
-    gp_rxns, gp_inits = pp.gpac_format(approx_majority, inits)
-    print('Reactions:')
+    gp_rxns, gp_inits = bt.gpac_format(approx_majority, inits)
+    print("Reactions:")
     for rxn in gp_rxns:
         print(rxn)
-    print('Initial conditions:')
+    print("Initial conditions:")
     for sp, count in gp_inits.items():
-        print(f'{sp}: {count}')
-    
+        print(f"{sp}: {count}")
+
     # for trials_exponent in range(3, 7):
     # for trials_exponent in range(3, 8):
     for trials_exponent in range(6, 7):
-        print(f'*************\nCollecting rebop data for pop size 10^{pop_exponent} with 10^{trials_exponent} trials\n')
-        trials = 10 ** trials_exponent
+        print(f"*************\nCollecting rebop data for pop size 10^{pop_exponent} with 10^{trials_exponent} trials\n")
+        trials = 10**trials_exponent
         results_rebop = gp.rebop_sample_future_configurations(gp_rxns, gp_inits, end_time, trials=trials)
         df = pl.DataFrame(results_rebop)
-        fn = f'examples/rebop_samples_n10e{pop_exponent}_trials10e{trials_exponent}.parquet'
+        fn = f"examples/rebop_samples_n10e{pop_exponent}_trials10e{trials_exponent}.parquet"
         df.write_parquet(fn, compression="zstd")
+
 
 if __name__ == "__main__":
     main()

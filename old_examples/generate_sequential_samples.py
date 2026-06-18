@@ -19,11 +19,12 @@ if False:
     sys.meta_path.insert(0, CustomPydFinder)
 
 
-import batss as pp
+import batss as bt
 import polars as pl
 
+
 def main():
-    a, b, u = pp.species('A B U')
+    a, b, u = bt.species("A B U")
     approx_majority = [
         a + b >> 2 * u,
         a + u >> 2 * a,
@@ -31,7 +32,7 @@ def main():
     ]
 
     pop_exponent = 4
-    n = 10 ** pop_exponent
+    n = 10**pop_exponent
     p = 0.51
     a_init = int(n * p)
     b_init = n - a_init
@@ -41,13 +42,16 @@ def main():
     # for trials_exponent in range(3, 7):
     # for trials_exponent in range(4, 8):
     for trials_exponent in range(8, 9):
-        print(f'*************\nCollecting sequential data for pop size 10^{pop_exponent} with 10^{trials_exponent} trials\n')
-        trials = 10 ** trials_exponent
-        sim = pp.Simulation(inits, approx_majority, simulator_method='sequential')
+        print(
+            f"*************\nCollecting sequential data for pop size 10^{pop_exponent} with 10^{trials_exponent} trials\n"
+        )
+        trials = 10**trials_exponent
+        sim = bt.Simulation(inits, approx_majority, simulator_method="sequential")
         results_sequential = sim.sample_future_configuration(end_time, num_samples=trials)
         df = pl.DataFrame(results_sequential)
-        fn = f'examples/sequential_samples_n10e{pop_exponent}_trials10e{trials_exponent}.parquet'
+        fn = f"examples/sequential_samples_n10e{pop_exponent}_trials10e{trials_exponent}.parquet"
         df.write_parquet(fn, compression="zstd")
+
 
 if __name__ == "__main__":
     main()
