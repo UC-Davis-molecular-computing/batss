@@ -693,6 +693,35 @@ impl SimulatorCRNMultiBatch {
         }
         return answer;
     }
+    /// Calculate the probability that a reaction in the next batch will be passive.
+    /// Done by manually adding up all of the possible vectors that might be sampled,
+    /// essentially executing the same loop as in batch_step.
+    /// There is some code duplication from this, which is tough to avoid.
+    pub fn passive_reaction_probability(&self) -> f64 {
+        let mut total_passive_mass = 0.0;
+        let mut total_non_passive_mass = 0.0;
+        let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
+        for random_transition in reactions_iter {
+            let (num_outputs, first_idx) = (random_transition[0], random_transition[1]);
+            if num_outputs == 0 {
+                // Passive reaction with probability 1.
+                total_passive_mass += 1.0;
+            } else {
+                // Still might have some probability of being passive.
+                let probabilities =
+                    self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
+                let non_null_probability_sum: f64 = probabilities.iter().sum();
+                total_non_passive_mass += non_null_probability_sum;
+                total_passive_mass += 1.0 - non_null_probability_sum;
+            }
+        }
+        let total_mass = total_passive_mass + total_non_passive_mass;
+        assert!(
+            (total_mass - self.crn.q.pow(self.crn.o as u32) as f64).abs() < 0.01,
+            "Total sum of probabilities should add up to number of reaction vectors"
+        );
+        total_passive_mass / total_mass
+    }
 }
 
 // TODO: if we're using this, figure out a sensible value for it? It will only matter really
