@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 use ndarray::{ArrayD, Axis};
 use pyo3::types::PyNone;
 
-use num_integer::binomial;
+use num_integer::{binomial, Roots};
 use numpy::PyReadonlyArray1;
 use rand::rngs::SmallRng;
 use rand::Rng;
@@ -523,8 +523,18 @@ impl SimulatorCRNMultiBatch {
                 }
                 self.recycle_waste();
             }
-            // TODO this should be set more generally
-            if self.n_including_extra_species == 0 {
+            let non_passive_probability = self.non_passive_reaction_probability();
+            let rough_expected_reactions_next_batch =
+                non_passive_probability * (self.n_including_extra_species as f64).sqrt();
+            // As a rough guideline, we will switch to Gillespie if the next batch is
+            // expected to do less than some constant number of reactions.
+            // The loop currently loops over all possible reactant vectors, and certainly
+            // needs to loop over all possible reactions at least,
+            // so we'll use the number of reactions as a conservative baseline
+            // (that is to say, this will probably be too reticent to use Gillespie)
+            self.do_gillespie =
+                rough_expected_reactions_next_batch < self.crn.reactions.len() as f64;
+            if non_passive_probability == 0.0 {
                 self.silent = true;
             }
         }
@@ -693,11 +703,11 @@ impl SimulatorCRNMultiBatch {
         }
         return answer;
     }
-    /// Calculate the probability that a reaction in the next batch will be passive.
+    /// Calculate the probability that a reaction in the next batch will be non-passive.
     /// Done by manually adding up all of the possible vectors that might be sampled,
     /// essentially executing the same loop as in batch_step.
     /// There is some code duplication from this, which is tough to avoid.
-    pub fn passive_reaction_probability(&self) -> f64 {
+    pub fn non_passive_reaction_probability(&self) -> f64 {
         let mut total_passive_mass = 0.0;
         let mut total_non_passive_mass = 0.0;
         let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
@@ -720,7 +730,7 @@ impl SimulatorCRNMultiBatch {
             (total_mass - self.crn.q.pow(self.crn.o as u32) as f64).abs() < 0.01,
             "Total sum of probabilities should add up to number of reaction vectors"
         );
-        total_passive_mass / total_mass
+        total_non_passive_mass / total_mass
     }
 }
 
