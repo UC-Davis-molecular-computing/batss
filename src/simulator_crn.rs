@@ -23,7 +23,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand_distr::{Distribution, Exp, Gamma, StandardUniform};
 
-use rebop::gillespie::{Gillespie, Rate};
+use rebop::gillespie::Gillespie;
 
 use itertools::Itertools;
 
@@ -546,7 +546,10 @@ impl SimulatorCRNMultiBatch {
                             gillespie_config[species_index] = self.urn.config[i] as isize;
                             species_index += 1;
                         }
-                        // TODO not sure what the false for "sparse" here means.
+                        // The "false" here means we aren't optimizing for the CRN to be "sparse."
+                        // See https://github.com/Armavica/rebop/pull/35 for a discussion.
+                        // I think the kinds of CRNs that this system is good at simulating,
+                        // will typically not be sparse, but that might not be true.
                         self.gillespie = Some(Gillespie::new(gillespie_config, false));
                     }
 
@@ -559,8 +562,11 @@ impl SimulatorCRNMultiBatch {
                         let mut gillespie_config: Vec<u64> = vec![0; self.q];
                         let mut species_index = 0;
                         for i in 0..self.q {
-                            if i == self.crn.k || i == self.crn.w {
+                            if i == self.crn.w {
                                 continue;
+                            }
+                            if i == self.crn.k {
+                                gillespie_config[i] = self.urn.config[i];
                             }
                             gillespie_config[i] =
                                 self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
@@ -579,16 +585,16 @@ impl SimulatorCRNMultiBatch {
                     self.recycle_waste();
                 }
             }
-            let non_passive_probability = self.non_passive_reaction_probability();
-            let rough_expected_reactions_next_batch =
-                non_passive_probability * (self.n_including_extra_species as f64).sqrt();
             // As a rough guideline, we will switch to Gillespie if the next batch is
             // expected to do less than some constant number of reactions.
-            // The loop currently loops over all possible reactant vectors, and certainly
-            // needs to loop over all possible reactions at least,
+            // The main loop in batch_step currently loops over all possible reactant vectors,
+            // and certainly needs to loop over all non-passive reactions at least,
             // so we'll use the number of reactions as a conservative baseline
             // (that is to say, this will probably be too reticent to use Gillespie)
-            if rough_expected_reactions_next_batch < self.crn.reactions.len() as f64 {
+            let non_passive_probability = self.non_passive_reaction_probability();
+            let rough_expected_non_passive_reactions_next_batch =
+                non_passive_probability * (self.n_including_extra_species as f64).sqrt();
+            if rough_expected_non_passive_reactions_next_batch < self.crn.reactions.len() as f64 {
                 if self.do_gillespie {
                     self.just_started_gillespie = false;
                 } else {
@@ -602,8 +608,6 @@ impl SimulatorCRNMultiBatch {
                 } else {
                     self.just_finished_gillespie = false;
                 }
-                self.do_gillespie = false;
-                self.just_started_gillespie = false;
             }
             if non_passive_probability == 0.0 {
                 self.silent = true;
@@ -778,30 +782,68 @@ impl SimulatorCRNMultiBatch {
     /// Done by manually adding up all of the possible vectors that might be sampled,
     /// essentially executing the same loop as in batch_step.
     /// There is some code duplication from this, which is tough to avoid.
-    pub fn non_passive_reaction_probability(&self) -> f64 {
-        let mut total_passive_mass = 0.0;
-        let mut total_non_passive_mass = 0.0;
+    /// Mutable because it resets self.array_sums in order to easily iterate through reactions.
+    pub fn non_passive_reaction_probability(&mut self) -> f64 {
+        // As a hack to avoid making a new NDBatchResult, we just sample 0 reactions into this one.
+        // This function should not be called in the middle of batch sampling,
+        // so this step should be safe to do.
+        self.array_sums.reset_contents();
+        // These aren't probabilities, they're parts of some total space that will be normalized later.
+        let mut total_passive_probability_mass = 0.0;
+        let mut total_non_passive_probability_mass = 0.0;
+        let mut done = false;
         let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
+        // TODO: we might be able to reintroduce the optimzation around keeping the urn sorted
+        // and taking advantage of sample_vector returning the highest state returned. Probably
+        // in the current implementation, this would live in NDBatchResult and its iteration,
+        // and we'd iterate over it instead of self.random_transitions.
         for random_transition in reactions_iter {
+            assert!(
+                !done,
+                "self.array_sums finished iterating before self.random_transitions"
+            );
+            let next_array_sum = self.array_sums.get_next();
+            let reactants = next_array_sum.0;
+            // We weight by the probability that this reaction will actually happen next,
+            // with these reactants in this order,
+            // non-passively. This is similar to calculating its propensity, as it's
+            // the number of ways to choose these reactants (in this order)
+            // divided by the total number of ways to choose reactants.
+            // Since this division is by a constant, we omit it.
+            let mut num_times_seen: HashMap<State, u64> = HashMap::new();
+            let mut num_ways_to_choose_these_reactants_in_order = 1.0;
+            for reactant in reactants {
+                *num_times_seen.entry(reactant).or_default() += 1;
+                let num_copies_of_next_reactant =
+                    self.urn.config[reactant] - num_times_seen[&reactant] - 1;
+                num_ways_to_choose_these_reactants_in_order *= num_copies_of_next_reactant as f64;
+                num_ways_to_choose_these_reactants_in_order /= num_times_seen[&reactant] as f64;
+            }
+            done = next_array_sum.2;
             let (num_outputs, first_idx) = (random_transition[0], random_transition[1]);
+            // TODO and WARNING: this code is more or less copy-paste with the collision sampling code.
+            // They do the same thing. But it's apparently very annoying to refactor this into a
+            // helper method in rust because of the immutable borrow of self above.
             if num_outputs == 0 {
-                // Passive reaction with probability 1.
-                total_passive_mass += 1.0;
+                // Passive reaction.
+                total_passive_probability_mass += num_ways_to_choose_these_reactants_in_order;
             } else {
-                // Still might have some probability of being passive.
                 let probabilities =
                     self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
-                total_non_passive_mass += non_passive_probability_sum;
-                total_passive_mass += 1.0 - non_passive_probability_sum;
+                total_passive_probability_mass +=
+                    non_passive_probability_sum * num_ways_to_choose_these_reactants_in_order;
+                total_non_passive_probability_mass += (1.0 - non_passive_probability_sum)
+                    * num_ways_to_choose_these_reactants_in_order;
             }
         }
-        let total_mass = total_passive_mass + total_non_passive_mass;
         assert!(
-            (total_mass - self.crn.q.pow(self.crn.o as u32) as f64).abs() < 0.01,
-            "Total sum of probabilities should add up to number of reaction vectors"
+            done,
+            "self.random_transitions finished iterating before self.array_sums"
         );
-        total_non_passive_mass / total_mass
+        let total_probability_mass =
+            total_passive_probability_mass + total_non_passive_probability_mass;
+        total_non_passive_probability_mass / total_probability_mass
     }
 }
 
@@ -906,8 +948,8 @@ struct NDBatchResult {
 }
 
 impl NDBatchResult {
-    // Recursive function used to generate new NDBatchResult.
-    // Creates and initializes all recursive substructures.
+    /// Recursive function used to generate new NDBatchResult.
+    /// Creates and initializes all recursive substructures.
     fn populate_empty(&mut self) {
         if self.dimensions > 1 {
             for _ in 0..self.q {
@@ -930,24 +972,35 @@ impl NDBatchResult {
             }
         }
     }
-    // Recursive function to sample how many of each possible reaction vector
-    // happen within some batch, using hypergeometric sampling via sample_vector.
+    /// Recursive function to sample how many of each possible reaction vector
+    /// happen within some batch, using hypergeometric sampling via sample_vector.
     fn sample_batch_result(&mut self, num_reactions: u64, urn: &mut Urn) {
         urn.sample_vector(num_reactions, &mut self.counts).unwrap();
         self.curr_species = 0;
         if self.dimensions > 1 {
             for i in 0..self.q {
-                let subresult = self.subresults.as_mut().unwrap();
-                subresult[i].sample_batch_result(self.counts[i], urn);
+                let subresults = self.subresults.as_mut().unwrap();
+                subresults[i].sample_batch_result(self.counts[i], urn);
             }
         }
     }
-    // Method used for recursively iterating through NDBatchResult.
-    // Returns triple (reactants, count, done).
-    // reactants: which reactant vector this entry represents
-    // count: how many times that reactant vector has been sampled in this batch
-    // done: true iff this is the last entry in the NDBatchResult.
-    // TODO this should probably implement an iterable trait
+    /// Reset the contents of this batch result, as though it sampled a batch of size 0.
+    fn reset_contents(&mut self) {
+        self.counts = Vec::new();
+        self.curr_species = 0;
+        if self.dimensions > 1 {
+            for i in 0..self.q {
+                let subresults = self.subresults.as_mut().unwrap();
+                subresults[i].reset_contents();
+            }
+        }
+    }
+    /// Method used for recursively iterating through NDBatchResult.
+    /// Returns triple (reactants, count, done).
+    /// reactants: which reactant vector this entry represents
+    /// count: how many times that reactant vector has been sampled in this batch
+    /// done: true iff this is the last entry in the NDBatchResult.
+    /// TODO this should probably implement an iterable trait
     fn get_next(&mut self) -> (Vec<State>, u64, bool) {
         assert!(
             self.curr_species < self.q,
@@ -1437,7 +1490,7 @@ impl SimulatorCRNMultiBatch {
     /// Get rid of W from self.urn.
     /// It is recycled to a better place.
     fn recycle_waste(&mut self) {
-        let delta_w = -1 * self.urn.config[self.crn.w] as i64;
+        let delta_w = -(self.urn.config[self.crn.w] as i64);
         assert!(self.n_including_extra_species as i64 + delta_w >= 0);
         self.n_including_extra_species = (self.n_including_extra_species as i64 + delta_w) as u64;
         self.urn.add_to_entry(self.crn.w, delta_w);
