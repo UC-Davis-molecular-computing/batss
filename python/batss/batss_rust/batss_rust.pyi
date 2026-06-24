@@ -34,16 +34,16 @@ class Simulator(ABC):
     silent: bool
     """TODO"""
 
-    discrete_steps_no_nulls: int
+    discrete_batched_steps_no_nulls: int
     """TODO"""
 
-    discrete_steps_no_nulls_last_run: int
+    discrete_batched_steps_no_nulls_last_run: int
     """TODO"""
 
-    discrete_steps_total: int
+    discrete_batched_steps_total: int
     """TODO"""
 
-    discrete_steps_total_last_run: int
+    discrete_batched_steps_total_last_run: int
     """TODO"""
 
     def run_until_silent(self) -> None:

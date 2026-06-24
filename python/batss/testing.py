@@ -225,8 +225,8 @@ def plot_runtimes(
 def _passive_fractions(sim: Simulation) -> tuple[list[float], list[float]]:
     # Intervals with zero total steps (always the first and last, sometimes
     # others at small n) would divide by zero — drop them.
-    total = np.array(sim.discrete_steps_total_last_run)
-    non_null = np.array(sim.discrete_steps_no_nulls_last_run)
+    total = np.array(sim.discrete_batched_steps_total_last_run)
+    non_null = np.array(sim.discrete_batched_steps_no_nulls_last_run)
     all_times = sim.history.index.tolist()
     times = [t for t, n in zip(all_times, total) if n > 0]
     fractions = [(n - m) / n for n, m in zip(total, non_null) if n > 0]

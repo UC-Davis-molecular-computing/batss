@@ -150,8 +150,8 @@ def plot_passive_reactions(pop_exponent: int, seed: int) -> None:
 
     # total steps starts with 0 (and for some reason ends with 0, I don't get that),
     # so we slice it to remove the first and last element to avoid dividing by zero.
-    total_steps = np.array(sim.discrete_steps_total_last_run)[1:-1]
-    non_passive_steps = np.array(sim.discrete_steps_no_passives_last_run)[1:-1]
+    total_steps = np.array(sim.discrete_batched_steps_total_last_run)[1:-1]
+    non_passive_steps = np.array(sim.discrete_batched_steps_no_passives_last_run)[1:-1]
     passive_steps = total_steps - non_passive_steps
     passive_fractions = passive_steps / total_steps
     non_passive_fractions = non_passive_steps / total_steps

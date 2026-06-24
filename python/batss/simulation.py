@@ -127,28 +127,28 @@ class Simulation:
     times: list[float]
     """A list of all the corresponding times for configs."""
 
-    discrete_steps_total: list[int]
+    discrete_batched_steps_total: list[int]
     """
     Parallel to self.times and self.configs, this is how many total steps were taken up to that time,
     including steps that simulated passive reactions. This is a cumulative list, i.e.,
-    self.discrete_steps_total[i] is the total number of steps taken up to time self.times[i].
+    self.discrete_batched_steps_total[i] is the total number of steps taken up to time self.times[i].
     """
 
-    discrete_steps_total_last_run: list[int]
+    discrete_batched_steps_total_last_run: list[int]
     """
-    Like :data:`Simulation.discrete_steps_total`, but only since the last call to 
+    Like :data:`Simulation.discrete_batched_steps_total`, but only since the last call to 
     :meth:`Simulation.simulator.run`.
     """
 
-    discrete_steps_no_passives: list[int]
+    discrete_batched_steps_no_passives: list[int]
     """
     Parallel to self.times and self.configs, this is how many total steps were taken up to that time,
-    NOT including steps that simulated passive reactions. Cumulative list similarly to self.discrete_steps_total.
+    NOT including steps that simulated passive reactions. Cumulative list similarly to self.discrete_batched_steps_total.
     """
 
-    discrete_steps_no_passives_last_run: list[int]
+    discrete_batched_steps_no_passives_last_run: list[int]
     """
-    Like :data:`Simulation.discrete_steps_total`, but only since the last call to 
+    Like :data:`Simulation.discrete_batched_steps_total`, but only since the last call to 
     :meth:`Simulation.simulator.run`.
     """
 
@@ -301,10 +301,10 @@ class Simulation:
                     sim = Simulation(init_config, rule, threshold=20)
 
         """
-        self.discrete_steps_total = []
-        self.discrete_steps_total_last_run = []
-        self.discrete_steps_no_passives = []
-        self.discrete_steps_no_passives_last_run = []
+        self.discrete_batched_steps_total = []
+        self.discrete_batched_steps_total_last_run = []
+        self.discrete_batched_steps_no_passives = []
+        self.discrete_batched_steps_no_passives_last_run = []
         self.simulator_method = simulator_method
         self.seed = seed
         self.rng = np.random.default_rng(seed)
@@ -847,11 +847,11 @@ class Simulation:
         self.configs.append(np.array(self.simulator.config))
         self.times.append(self.time)
 
-        self.discrete_steps_total.append(self.simulator.discrete_steps_total)
-        self.discrete_steps_no_passives.append( self.simulator.discrete_steps_no_passives)
+        self.discrete_batched_steps_total.append(self.simulator.discrete_batched_steps_total)
+        self.discrete_batched_steps_no_passives.append( self.simulator.discrete_batched_steps_no_passives)
 
-        self.discrete_steps_total_last_run.append(self.simulator.discrete_steps_total_last_run)
-        self.discrete_steps_no_passives_last_run.append( self.simulator.discrete_steps_no_passives_last_run)
+        self.discrete_batched_steps_total_last_run.append(self.simulator.discrete_batched_steps_total_last_run)
+        self.discrete_batched_steps_no_passives_last_run.append( self.simulator.discrete_batched_steps_no_passives_last_run)
 
     def set_snapshot_time(self, time: float) -> None:
         """Updates all snapshots to the nearest recorded configuration to a specified time.
