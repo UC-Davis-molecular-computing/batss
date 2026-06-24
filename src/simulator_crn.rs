@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 use ndarray::{ArrayD, Axis};
 use pyo3::types::PyNone;
 
-use num_integer::binomial;
+use num_integer::{binomial, Roots};
 use numpy::PyReadonlyArray1;
 use rand::rngs::SmallRng;
 use rand::Rng;
@@ -253,7 +253,6 @@ impl UniformCRN {
         return factor;
     }
 }
-
 #[pyclass(extends = Simulator)]
 pub struct SimulatorCRNMultiBatch {
     /// The CRN with a list of reactions, so we can recompute probabilities when the
@@ -275,23 +274,27 @@ pub struct SimulatorCRNMultiBatch {
     /// The current number of elapsed interaction steps that actually simulated something in
     /// the original CRN, rather than being a passive reaction,
     /// since the Simulator was created.
+    /// WARNING: does not count steps from reactions simulated using Gillespie.
     #[pyo3(get, set)]
-    pub discrete_steps_no_passives: u64,
+    pub discrete_batched_steps_no_passives: u64,
 
     /// The current number of elapsed interaction steps in this CRN, including passive reactions,
     /// since the Simulator was created.
+    /// WARNING: does not count steps from reactions simulated using Gillespie.
     #[pyo3(get, set)]
-    pub discrete_steps_total: u64,
+    pub discrete_batched_steps_total: u64,
 
     /// The total number of states (length of urn.config),
     /// in the most recent call to run.
+    /// WARNING: does not count steps from reactions simulated using Gillespie.
     #[pyo3(get, set)]
-    pub discrete_steps_no_passives_last_run: u64,
+    pub discrete_batched_steps_no_passives_last_run: u64,
 
     /// The number of elapsed interaction steps in this CRN, including passive reactions,
     /// in the most recent call to run.
+    /// WARNING: does not count steps from reactions simulated using Gillespie.
     #[pyo3(get, set)]
-    pub discrete_steps_total_last_run: u64,
+    pub discrete_batched_steps_total_last_run: u64,
 
     /// The total number of states (length of urn.config).
     /// Includes the auxiliary species K and W.
@@ -345,13 +348,7 @@ pub struct SimulatorCRNMultiBatch {
     /// Struct which stores the result of hypergeometric sampling.
     array_sums: NDBatchResult,
 
-    /// Array which stores the counts of responder agents for each type of
-    /// initiator agent (one row of the 'D' matrix from the paper).
-    #[allow(dead_code)]
-    row: Vec<u64>,
-
     /// Vector holding multinomial samples when doing randomized transitions.
-    #[allow(dead_code)]
     m: Vec<u64>,
 
     /// A boolean determining if we are currently doing Gillespie steps.
@@ -424,10 +421,10 @@ impl SimulatorCRNMultiBatch {
             .fold(0, |acc, x| acc.max(x));
 
         let continuous_time = 0.0;
-        let discrete_steps_no_passives = 0;
-        let discrete_steps_total = 0;
-        let discrete_steps_no_passives_last_run = 0;
-        let discrete_steps_total_last_run = 0;
+        let discrete_batched_steps_no_passives = 0;
+        let discrete_batched_steps_total = 0;
+        let discrete_batched_steps_no_passives_last_run = 0;
+        let discrete_batched_steps_total_last_run = 0;
         let rng = if let Some(s) = seed {
             SmallRng::seed_from_u64(s)
         } else {
@@ -437,7 +434,6 @@ impl SimulatorCRNMultiBatch {
         let updated_counts = Urn::new(vec![0; q], seed);
         let urn = Urn::new(config.clone(), seed);
         let array_sums = make_batch_result(crn.o, q);
-        let row = vec![0; q];
         // The +1 here is to sample how many reactions are passive.
         let m = vec![0; random_depth + 1];
         let silent = false;
@@ -482,10 +478,10 @@ impl SimulatorCRNMultiBatch {
             n,
             n_including_extra_species,
             continuous_time,
-            discrete_steps_no_passives,
-            discrete_steps_total,
-            discrete_steps_no_passives_last_run,
-            discrete_steps_total_last_run,
+            discrete_batched_steps_no_passives,
+            discrete_batched_steps_total,
+            discrete_batched_steps_no_passives_last_run,
+            discrete_batched_steps_total_last_run,
             q,
             random_transitions,
             random_outputs,
@@ -495,7 +491,6 @@ impl SimulatorCRNMultiBatch {
             urn,
             updated_counts,
             array_sums,
-            row,
             m,
             do_gillespie,
             gillespie,
@@ -520,8 +515,8 @@ impl SimulatorCRNMultiBatch {
     /// Run the simulation for a specified number of steps or until max time is reached
     #[pyo3(signature = (t_max, max_wallclock_time=3600.0))]
     pub fn run(&mut self, t_max: f64, max_wallclock_time: f64) -> PyResult<()> {
-        self.discrete_steps_no_passives_last_run = 0;
-        self.discrete_steps_total_last_run = 0;
+        self.discrete_batched_steps_no_passives_last_run = 0;
+        self.discrete_batched_steps_total_last_run = 0;
         if self.silent {
             return Err(PyValueError::new_err("Simulation is silent; cannot run."));
         }
@@ -552,10 +547,7 @@ impl SimulatorCRNMultiBatch {
                         // will typically not be sparse, but that might not be true.
                         self.gillespie = Some(Gillespie::new(gillespie_config, false));
                     }
-
-                    // For now, we're going to assume that we will need to do, say,
-                    // at least O(sqrt n) reactions until it's worth turning on batching again.
-                    // TODO actually do the gillespie algorithm here
+                    self.gillespie_steps(t_max);
                 } else {
                     if self.just_finished_gillespie {
                         // We need to load the configuration from gillespie into the urn.
@@ -650,10 +642,10 @@ impl SimulatorCRNMultiBatch {
         }
         self.n_including_extra_species = self.n + self.urn.config[self.crn.k];
         self.continuous_time = t;
-        self.discrete_steps_no_passives = 0;
-        self.discrete_steps_total = 0;
-        self.discrete_steps_no_passives_last_run = 0;
-        self.discrete_steps_total_last_run = 0;
+        self.discrete_batched_steps_no_passives = 0;
+        self.discrete_batched_steps_total = 0;
+        self.discrete_batched_steps_no_passives_last_run = 0;
+        self.discrete_batched_steps_total_last_run = 0;
         self.silent = self.n == 0;
         Ok(())
     }
@@ -1128,7 +1120,7 @@ impl SimulatorCRNMultiBatch {
             .sample_batch_result(rxns_before_coll, &mut self.urn);
         flame::end("sample batch");
 
-        let initial_t_including_passives = self.discrete_steps_total;
+        let initial_t_including_passives = self.discrete_batched_steps_total;
         flame::start("process batch");
         let mut done = false;
         let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
@@ -1169,8 +1161,8 @@ impl SimulatorCRNMultiBatch {
             } else {
                 flame::start("non-passive reaction");
                 // We'll add this for now, then subtract off the probabilistically passive reactions later.
-                self.discrete_steps_no_passives += quantity;
-                self.discrete_steps_no_passives_last_run += quantity;
+                self.discrete_batched_steps_no_passives += quantity;
+                self.discrete_batched_steps_no_passives_last_run += quantity;
                 let mut probabilities =
                     self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
@@ -1207,8 +1199,8 @@ impl SimulatorCRNMultiBatch {
                         self.updated_counts
                             .add_to_entry(reactant, passive_count as i64);
                     }
-                    self.discrete_steps_no_passives -= passive_count;
-                    self.discrete_steps_no_passives_last_run -= passive_count;
+                    self.discrete_batched_steps_no_passives -= passive_count;
+                    self.discrete_batched_steps_no_passives_last_run -= passive_count;
                 }
                 flame::end("non-passive reaction");
             }
@@ -1315,8 +1307,8 @@ impl SimulatorCRNMultiBatch {
                 self.updated_counts
                     .add_to_entry(self.crn.w, (self.crn.g) as i64);
             } else {
-                self.discrete_steps_no_passives += 1;
-                self.discrete_steps_no_passives_last_run += 1;
+                self.discrete_batched_steps_no_passives += 1;
+                self.discrete_batched_steps_no_passives_last_run += 1;
                 let mut probabilities =
                     self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
@@ -1352,8 +1344,8 @@ impl SimulatorCRNMultiBatch {
                         self.updated_counts
                             .add_to_entry(reactant, passive_count as i64);
                     }
-                    self.discrete_steps_no_passives -= passive_count;
-                    self.discrete_steps_no_passives_last_run -= passive_count;
+                    self.discrete_batched_steps_no_passives -= passive_count;
+                    self.discrete_batched_steps_no_passives_last_run -= passive_count;
                 }
             }
             assert_eq!(
@@ -1361,21 +1353,21 @@ impl SimulatorCRNMultiBatch {
                 (self.crn.o + self.crn.g) as u64 - num_resampled,
                 "Collision failed to add exactly g things to updated_counts"
             );
-            self.discrete_steps_total += 1;
-            self.discrete_steps_total_last_run += 1;
+            self.discrete_batched_steps_total += 1;
+            self.discrete_batched_steps_total_last_run += 1;
         }
         flame::end("sample collision");
 
         // TODO move this line to a more sensible place
-        self.discrete_steps_total += rxns_before_coll;
-        self.discrete_steps_total_last_run += rxns_before_coll;
+        self.discrete_batched_steps_total += rxns_before_coll;
+        self.discrete_batched_steps_total_last_run += rxns_before_coll;
 
         self.urn.add_vector(&self.updated_counts.config);
         self.urn.sort();
         // Check that we added the right number of things to the urn.
         assert_eq!(
             self.urn.size - self.n_including_extra_species,
-            (self.discrete_steps_total - initial_t_including_passives) * self.crn.g as u64,
+            (self.discrete_batched_steps_total - initial_t_including_passives) * self.crn.g as u64,
             "Inconsistency between number of reactions simulated and population size change."
         );
         assert_eq!(
@@ -1390,81 +1382,72 @@ impl SimulatorCRNMultiBatch {
         //self.update_enabled_reactions();
     }
 
-    /// Perform a Gillespie step.
-    /// Samples the time until the next non-passive interaction and updates.
-    /// Args:
-    /// num_steps:
-    ///     If positive, the maximum value of :any:`t` that will be reached.
-    ///     If the sampled time is greater than num_steps, then it will instead
-    ///     be set to num_steps and no reaction will be performed.
-    ///     (Because of the memoryless property of the geometric, this gives a
-    ///     faithful simulation up to step num_steps).
+    /// Perform some Gillespie steps.
+    /// The exact number of steps performed is not deterministic;
+    /// we run Gillespie for roughly sqrt(n) steps, and then re-check whether batching
+    /// is likely to be faster again.
+    fn gillespie_steps(&mut self, t_max: f64) -> () {
+        let original_gillespie_population = self.total_gillespie_population();
+        assert!(
+            original_gillespie_population == self.n,
+            "self.n ({:?}) does not match gillespie value of n ({:?})",
+            self.n,
+            original_gillespie_population
+        );
+        const NUM_CONST_GILLESPIE_STEPS: usize = 30;
+        {
+            // Borrow mutably for as long as we need it, for convenience.
+            let gillespie = self.gillespie.as_mut().unwrap();
+            gillespie.set_time(self.continuous_time);
+            // We'll just run a small constant number of steps, see how much (CRN) time that took,
+            // and use that as an estimate for how long we need to run to get the desired
+            // number of steps. Doing this because I'm not confident whether calling
+            // advance_one_reaction in a loop will be slower than advance_until,
+            // and curerntly the rebop API doesn't have a function to advance a fixed number of steps.
+            for _ in 0..NUM_CONST_GILLESPIE_STEPS {
+                gillespie.advance_one_reaction();
+                if gillespie.get_time() > t_max {
+                    self.continuous_time = t_max;
+                    break;
+                }
+            }
+        }
+        let cur_gillespie_time = self.gillespie.as_ref().unwrap().get_time();
+        // Unless we're already over t_max after that small number of steps,
+        // run enough to simulate around sqrt(n) additional reactions.
+        if self.continuous_time < t_max {
+            let elapsed_time = cur_gillespie_time - self.continuous_time;
+            let time_per_step = elapsed_time / NUM_CONST_GILLESPIE_STEPS as f64;
+            // For now, we're going to assume that we will need to do, say,
+            // at least O(sqrt n) reactions until it's worth turning on batching again.
+            let num_steps_to_take = self.n.sqrt();
+            let time_to_run_gillespie = time_per_step * num_steps_to_take as f64;
+            let time_to_run_gillespie_until =
+                (cur_gillespie_time + time_to_run_gillespie).min(t_max);
+            self.gillespie
+                .as_mut()
+                .unwrap()
+                .advance_until(time_to_run_gillespie_until);
+        }
 
-    #[allow(dead_code)]
-    fn gillespie_step(&mut self, _t_max: u64) -> () {
-        unimplemented!()
-        // let total_propensity = self.get_total_propensity();
-        // if total_propensity == 0.0 {
-        //     self.silent = true;
-        //     return;
-        // }
-        // let n_choose_2 = (self.n * (self.n - 1) / 2) as f64;
-        // let success_probability = total_propensity / n_choose_2;
-
-        // if success_probability > self.gillespie_threshold {
-        //     self.do_gillespie = false;
-        // }
-        // let geometric = Geometric::new(success_probability).unwrap();
-        // let uniform = Uniform::new(0.0, total_propensity).unwrap();
-        // // add a geometric number of steps, based on success probability
-        // let steps: u64 = self.rng.sample(geometric);
-        // self.t += steps as usize;
-        // if t_max > 0 && self.t > t_max {
-        //     self.t = t_max;
-        //     return;
-        // }
-        // // sample the successful reaction r, currently just using linear search
-        // let mut x: f64 = self.rng.sample(uniform);
-        // let mut i = 0;
-        // while x > 0.0 {
-        //     x -= self.propensities[self.enabled_reactions[i]];
-        //     i += 1;
-        // }
-        // let (r1, r2, p1, p2) = self.reactions[self.enabled_reactions[i - 1]];
-
-        // // update with the successful reaction r1+r2 --> p1+p2
-        // // if any products were not already present, or any reactants went absent, will update enabled_reactions
-        // let new_products = self.urn.config[p1] == 0 || self.urn.config[p2] == 0;
-        // let absent_reactants = self.urn.config[r1] == 0 || self.urn.config[r2] == 0;
-        // if new_products || absent_reactants {
-        //     self.update_enabled_reactions();
-        // }
-
-        // // now apply the reaction
-        // self.urn.add_to_entry(r1, -1);
-        // self.urn.add_to_entry(r2, -1);
-        // self.urn.add_to_entry(p1, 1);
-        // self.urn.add_to_entry(p2, 1);
+        let new_gillespie_population = self.total_gillespie_population();
+        let delta_n = new_gillespie_population - original_gillespie_population;
+        self.n += delta_n;
+        self.n_including_extra_species += delta_n;
+        self.continuous_time = self.gillespie.as_ref().unwrap().get_time();
+        // We'd like to update self.discrete_batched_steps_no_passives and
+        // self.discrete_batched_steps_total, but rebop does not keep track of how many reactions
+        // it simulates, so at least for now those variables only count batched steps.
     }
 
-    /// Updates propensity vector, and returns total propensity:
-    /// the probability the next interaction is non-passive.
-    // fn get_total_propensity(&mut self) -> f64 {
-    //     unimplemented!()
-    //     // let mut total_propensity = 0.0;
-    //     // for j in 0..self.num_enabled_reactions {
-    //     //     let i = self.enabled_reactions[j];
-    //     //     let a = self.urn.config[self.reactions[i].0] as f64;
-    //     //     let b = self.urn.config[self.reactions[i].1] as f64;
-    //     //     if self.reactions[i].0 == self.reactions[i].1 {
-    //     //         self.propensities[i] = (a * (a - 1.0) / 2.0) * self.reaction_probabilities[i];
-    //     //     } else {
-    //     //         self.propensities[i] = a * b * self.reaction_probabilities[i];
-    //     //     }
-    //     //     total_propensity += self.propensities[i];
-    //     // }
-    //     // total_propensity
-    // }
+    /// Helper to get the total current population in the Gillespie simulation.
+    fn total_gillespie_population(&self) -> u64 {
+        let mut total = 0;
+        for i in 0..self.q - 2 {
+            total += self.gillespie.as_ref().unwrap().get_species(i) as u64;
+        }
+        total
+    }
 
     /// Update the count of K in preparation for the next batch.
     /// We will try to choose a value for the count of K that maximizes the expected amount
