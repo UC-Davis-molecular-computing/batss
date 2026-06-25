@@ -27,12 +27,8 @@ fn main() {
     let trials = 10usize.pow(trials_exponent);
     let mut d_values = Vec::with_capacity(trials);
 
-    let filename = format!(
-        "data/dimer_D-counts_time{end_time}_n1e{pop_exponent}_trials1e{trials_exponent}_rebop.json"
-    );
-    println!(
-        "Running rebop directly from Rust collecting dimerization D counts at time {end_time}"
-    );
+    let filename = format!("data/dimer_D-counts_time{end_time}_n1e{pop_exponent}_trials1e{trials_exponent}_rebop.json");
+    println!("Running rebop directly from Rust collecting dimerization D counts at time {end_time}");
     println!("n=10^{pop_exponent}, trials=10^{trials_exponent}");
     println!("Writing results to {filename}");
 

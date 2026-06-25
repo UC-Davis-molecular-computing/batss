@@ -12,9 +12,9 @@ Modules:
 
 Example:
     .. code-block:: python
-    
+
         from batss import species, Simulation
-        
+
         # Define a simple protocol
         a, b, u = species('A B U')
         approx_majority = [
@@ -22,7 +22,7 @@ Example:
             a + u >> 2 * a,
             b + u >> 2 * b,
         ]
-        
+
         # Initialize and run simulation
         n = 10 ** 5
         a_init = int(0.51 * n)
@@ -35,6 +35,7 @@ Example:
 
 try:
     from importlib.metadata import version
+
     __version__ = version("batss")
 except Exception:
     # Fallback for docs builds where package isn't installed

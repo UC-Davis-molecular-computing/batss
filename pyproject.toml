@@ -42,6 +42,9 @@ include = ["batss/**/*.py", "batss/**/*.pyi", "batss/py.typed", "MANIFEST.in"]
 # Ignore CONDA_PREFIX environment variable to avoid conflicts with virtual environments
 ignore-conda-prefix = true
 
+[tool.ruff]
+line-length = 120
+
 [project.optional-dependencies]
 docs = [
     "sphinx>=7.0.0",

@@ -46,7 +46,7 @@ from batss.batss_rust import Simulator, SimulatorCRNMultiBatch
 State: TypeAlias = Hashable
 # the plays nicer with generic collections like dict[StateTypeVar, int] than using State
 # "Dictionaries are invariant in their key type" is the jargon.
-StateTypeVar = TypeVar("StateTypeVar", bound=State) 
+StateTypeVar = TypeVar("StateTypeVar", bound=State)
 Output: TypeAlias = tuple[State, State] | dict[tuple[State, State], float]
 TransitionFunction: TypeAlias = Callable[[State, State], Output]
 Rule: TypeAlias = TransitionFunction | dict[tuple[State, State], Output] | Iterable[Reaction]
@@ -60,6 +60,7 @@ or will be converted into a population protocol if it's using original ppsim-sty
 """
 
 ConvergenceDetector: TypeAlias = Callable[[dict[State, int]], bool]
+
 
 # TODO: give other option for when the number of reachable states is large or unbounded
 def state_enumeration(init_dist: dict[StateTypeVar, int], rule: Callable[[State, State], Output]) -> set[State]:
@@ -82,8 +83,7 @@ def state_enumeration(init_dist: dict[StateTypeVar, int], rule: Callable[[State,
         if unchecked_state not in checked_states:
             checked_states.add(unchecked_state)
         for checked_state in checked_states:
-            for new_states in [rule(checked_state, unchecked_state),
-                               rule(unchecked_state, checked_state)]:
+            for new_states in [rule(checked_state, unchecked_state), rule(unchecked_state, checked_state)]:
                 assert new_states is not None
                 if isinstance(new_states, dict):
                     # if the output is a distribution
@@ -197,21 +197,21 @@ class Simulation:
 
     simulator_method: str
 
-    #TODO: this manual constructor defeats some of the purpose of dataclasses; make more default values and
-    # replace this with __post_init__ 
+    # TODO: this manual constructor defeats some of the purpose of dataclasses; make more default values and
+    # replace this with __post_init__
     def __init__(
-            self, 
-            init_config: dict[StateTypeVar, int], 
-            rule: Rule, 
-            *,
-            simulator_method: str = "crn",
-            transition_order: str = "symmetric", 
-            seed: int | None = None,
-            volume: float | None = None, 
-            continuous_time: bool = False, 
-            time_units: str | None = None,
-            crn: CRN | None = None,
-            **kwargs
+        self,
+        init_config: dict[StateTypeVar, int],
+        rule: Rule,
+        *,
+        simulator_method: str = "crn",
+        transition_order: str = "symmetric",
+        seed: int | None = None,
+        volume: float | None = None,
+        continuous_time: bool = False,
+        time_units: str | None = None,
+        crn: CRN | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize a Simulation.
@@ -219,7 +219,7 @@ class Simulation:
         Args:
             init_config: The starting configuration, as a
                 dictionary mapping states to counts.
-            
+
             rule: A representation of the transition rule. The first two options are
                 a dictionary, whose keys are tuples of 2 states and values are their
                 outputs, or a function which takes pairs of states as input. For a
@@ -230,7 +230,7 @@ class Simulation:
                 passive transitions that return the same pair of states as the output.
                 The third option is a list of :class:`ppsim.crn.Reaction` objects describing a CRN,
                 which will be parsed into an equivalent population protocol.
-            
+
             simulator_method: Which Simulator method to use, either ``'MultiBatch'``
                 or ``'Sequential'`` or ``'Gillespie'`` or ``'CRN'``.
                 - ``'MultiBatch'``:
@@ -238,7 +238,7 @@ class Simulation:
                     using batching, and is much faster for large population sizes and
                     relatively small state sets.
                 - ``'Gillespie'``:
-                    uncondtionally uses the Gillespie algorithm. Still uses the multibatch 
+                    uncondtionally uses the Gillespie algorithm. Still uses the multibatch
                     simulator, but instructs it to always use the Gillespie algorithm.
                 - ``'Sequential'``:
                     :class:`batss_rust.SimulatorSequentialArray` represents the population as an array of
@@ -248,7 +248,7 @@ class Simulation:
                     :class:`batss_rust.SimulatorCRNMultiBatch` does parallel batching for arbitrary
                     CRNs, and should be faster than Gillespie on large population sizes and
                     small species sets.
-            
+
             transition_order: Should the rule be interpreted as being symmetric,
                 either ``'asymmetric'``, ``'symmetric'``, or ``'symmetric_enforced'``.
                 Defaults to 'symmetric'.
@@ -268,20 +268,20 @@ class Simulation:
                     The same as symmetric, except that if rule(a, b)
                     and rule(b, a) are non-passive and do not give the same set of outputs,
                     a ValueError is raised.
-            
+
             seed: An optional integer used as the seed for all pseudorandom number
                 generation. Defaults to None.
-            
+
             volume: If a list of :class:`ppsim.crn.Reaction` objects is given for a CRN, then
                 the parameter volume can be passed in here. Defaults to None.
                 If None, the volume will be assumed to be the population size n.
-            
+
             continuous_time: Whether continuous time is used. Defaults to False.
                 If a CRN as a list of reactions is passed in, this will be set to True.
-            
+
             time_units: An optional string given the units that time is in. Defaults to None.
                 This must be a valid string to pass as unit to pandas.to_timedelta.
-            
+
             **kwargs: If `rule` is a function, any extra function parameters are passed in here,
                 beyond the first two arguments representing the two agents. For example, if `rule` is
                 defined:
@@ -322,15 +322,14 @@ class Simulation:
         except TypeError:
             # might end up here if rule is not even iterable, e.g., is a function
             rule_is_reaction_iterable = False
-        if rule_is_reaction_iterable and not simulator_method.lower() == 'crn':
+        if rule_is_reaction_iterable and not simulator_method.lower() == "crn":
             if volume is None:
                 volume = self.n
             rule, rate_max = reactions_to_dict(rule, self.n, volume)  # type: ignore
-            transition_order = 'asymmetric'
+            transition_order = "asymmetric"
             self.steps_per_time_unit *= rate_max
             # Default to continuous time for lists of reactions
             self.continuous_time = True
-            
 
         self._rule = rule
         self._rule_kwargs = kwargs
@@ -348,13 +347,13 @@ class Simulation:
                 else:
                     states.extend(output)
             state_list = list(set(states))
-        elif simulator_method.lower() == 'crn':
+        elif simulator_method.lower() == "crn":
             # TODO: a lot of this code is really really written with the assumption of operating
             # on population protocols. It'll take some significant refactoring to get it to not
             # be ugly to also work easily with general CRNs. For now, I'm letting it be ugly.
             # All of the code paths are based on whether or not simulator_method.lower() == 'crn'.
             states = []
-            for reaction in rule: # type: ignore
+            for reaction in rule:  # type: ignore
                 states += reaction.reactants.species
                 states += reaction.products.species
             state_list = list(set(states))
@@ -369,22 +368,21 @@ class Simulation:
         self.state_list = natsorted(state_list, key=lambda x: repr(x))
         self.state_dict = {state: i for i, state in enumerate(self.state_list)}
 
-        
         if simulator_method.lower() == "crn":
             if volume is None:
                 volume = self.n
             # Build a CRN and modify it to make all reactions uniform in order and generativity.
-            crn = CRN(list(rule), self.state_list) # type: ignore
+            crn = CRN(list(rule), self.state_list)  # type: ignore
             self._crn = convert_to_uniform(crn, volume)
             # TODO we probably want to keep track of these separately, because we don't want to
             # report the counts of K and W to the end user, typically.
             self.state_list = natsorted(state_list, key=lambda x: repr(x)) + extra_species()
             self.state_dict = {state: i for i, state in enumerate(self.state_list)}
 
-        if simulator_method.lower() == 'crn':
+        if simulator_method.lower() == "crn":
             self._method = SimulatorCRNMultiBatch
         else:
-            raise ValueError('simulator_method must be crn.')
+            raise ValueError("simulator_method must be crn.")
         self._transition_order = transition_order
         self.initialize_simulator(self.array_from_dict(init_config))
 
@@ -398,13 +396,12 @@ class Simulation:
             tuples = [dataclasses.astuple(state) for state in self.state_list]  # type: ignore
         else:
             # Check for NamedTuple.
-            field_names = getattr(state, '_fields', None)
+            field_names = getattr(state, "_fields", None)
             tuples = self.state_list
         # Check also for tuple.
-        if (field_names is not None and len(field_names) > 1) \
-                or (isinstance(state, tuple) and len(state) > 1):
+        if (field_names is not None and len(field_names) > 1) or (isinstance(state, tuple) and len(state) > 1):
             # Make a MultiIndex only if there are multiple fields
-            self.column_names = pd.MultiIndex.from_tuples(tuples, names=field_names) # type: ignore
+            self.column_names = pd.MultiIndex.from_tuples(tuples, names=field_names)  # type: ignore
         else:
             self.column_names = [str(i) for i in self.state_list]
         self.configs = []
@@ -412,8 +409,9 @@ class Simulation:
         self.time = 0.0
         self.add_config()
         # private history dataframe is initially empty, updated by the getter of property self.history
-        self._history = pd.DataFrame(data=self.configs, index=pd.Index(self.times_in_units(self.times)),
-                                     columns=self.column_names)
+        self._history = pd.DataFrame(
+            data=self.configs, index=pd.Index(self.times_in_units(self.times)), columns=self.column_names
+        )
         self.snapshots = []
 
     def rule(self, a: State, b: State) -> Output:
@@ -446,7 +444,7 @@ class Simulation:
         Args:
             config: The config array to instantiate the simulator.
         """
-        use_crn_mode = self.simulator_method.lower() == 'crn'
+        use_crn_mode = self.simulator_method.lower() == "crn"
         q = len(self.state_list)
         delta = None
         reactions = None
@@ -454,7 +452,7 @@ class Simulation:
         w_state = None
         passive_transitions = None
         random_transitions = None
-        random_outputs = None # type: ignore
+        random_outputs = None  # type: ignore
         random_outputs_arr = None
         transition_probabilities = None
         if use_crn_mode:
@@ -474,7 +472,7 @@ class Simulation:
                     # when output is a distribution
                     if isinstance(output, dict):
                         s = sum(output.values())
-                        assert s <= 1 + 2 ** -20, "The sum of output probabilities must be <= 1."
+                        assert s <= 1 + 2**-20, "The sum of output probabilities must be <= 1."
                         # ensure probabilities sum to 1
                         if 1 - s:
                             if (a, b) in output.keys():
@@ -487,7 +485,7 @@ class Simulation:
                         else:
                             # add (number of outputs, index to outputs)
                             random_transitions[i, j] = (len(output), len(random_outputs))
-                            for (x, y) in output.keys():
+                            for x, y in output.keys():
                                 random_outputs.append((self.state_dict[x], self.state_dict[y]))
                             transition_probabilities.extend(list(output.values()))
                     if set(output) == {a, b}:
@@ -498,12 +496,15 @@ class Simulation:
 
             # if random_outputs is empty, this makes a 0D ndarray, but we need a 2D array,
             # with len (shape[0]) = 0, so that the first dimension's length will match with transition_probabilities
-            random_outputs_arr = np.array(random_outputs, dtype=np.uint) \
-                if len(random_outputs) > 0 else np.empty(shape=(0,2), dtype=np.uint)
+            random_outputs_arr = (
+                np.array(random_outputs, dtype=np.uint)
+                if len(random_outputs) > 0
+                else np.empty(shape=(0, 2), dtype=np.uint)
+            )
 
             transition_probabilities = np.array(transition_probabilities, dtype=float)
 
-            if self._transition_order.lower() in ['symmetric', 'symmetric_enforced']:
+            if self._transition_order.lower() in ["symmetric", "symmetric_enforced"]:
                 for i in range(q):
                     for j in range(q):
                         # Set the output for i, j to be equal to j, i if passive
@@ -512,23 +513,31 @@ class Simulation:
                             delta[i, j] = delta[j, i]
                             random_transitions[i, j] = random_transitions[j, i]
                         # If i, j and j, i are both non-passive, with symmetric_enforced, check outputs are equal
-                        elif self._transition_order.lower() == 'symmetric_enforced' \
-                                and not passive_transitions[j, i]:
-                            if sorted(delta[i, j]) != sorted(delta[j, i]) or \
-                                    random_transitions[i, j, 0] != random_transitions[j, i, 0]:
+                        elif self._transition_order.lower() == "symmetric_enforced" and not passive_transitions[j, i]:
+                            if (
+                                sorted(delta[i, j]) != sorted(delta[j, i])
+                                or random_transitions[i, j, 0] != random_transitions[j, i, 0]
+                            ):
                                 a, b = self.state_list[i], self.state_list[j]
-                                raise ValueError(f'''Asymmetric interaction:
+                                raise ValueError(f"""Asymmetric interaction:
                                                 {a, b} -> {self.rule(a, b)}
-                                                {b, a} -> {self.rule(b, a)}''')
+                                                {b, a} -> {self.rule(b, a)}""")
 
-        gillespie = self.simulator_method.lower() == 'gillespie' if not use_crn_mode else None
+        gillespie = self.simulator_method.lower() == "gillespie" if not use_crn_mode else None
         transition_order = self._transition_order if not use_crn_mode else None
 
         self.simulator = self._method(
-            config, delta, 
-            random_transitions, random_outputs_arr, transition_probabilities, 
+            config,
+            delta,
+            random_transitions,
+            random_outputs_arr,
+            transition_probabilities,
             transition_order,
-            gillespie, self.seed, reactions, k_state, w_state
+            gillespie,
+            self.seed,
+            reactions,
+            k_state,
+            w_state,
         )
 
     def array_from_dict(self, d: dict) -> npt.NDArray[np.uint]:
@@ -546,7 +555,7 @@ class Simulation:
         for k in d.keys():
             a[self.state_dict[k]] += d[k]
         return a
-    
+
     def silent(self) -> bool:
         """Check if the configuration is silent.
 
@@ -555,9 +564,13 @@ class Simulation:
         """
         return self.simulator.silent
 
-    def run(self, run_until: float | ConvergenceDetector | None = None,
-            history_interval: float | Callable[[float], float] = 1.,
-            stopping_interval: float = 1., timer: bool = True) -> None:
+    def run(
+        self,
+        run_until: float | ConvergenceDetector | None = None,
+        history_interval: float | Callable[[float], float] = 1.0,
+        stopping_interval: float = 1.0,
+        timer: bool = True,
+    ) -> None:
         """Runs the simulation.
 
         Can give a fixed amount of time to run the simulation, or a function that checks
@@ -572,15 +585,15 @@ class Simulation:
                 is silent (all transitions are passive). This only works with the multibatch
                 simulator method, if another simulator method is given, then using None will
                 raise a ValueError.
-            
+
             history_interval: The length to run the simulator before recording data,
                 in current time units. Defaults to 1.
                 This can either be a float, or a function that takes the current time and
                 and returns a float.
-            
+
             stopping_interval: The length to run the simulator before checking for the stop
                 condition.
-            
+
             timer: If True, and there are no other snapshot objects, a default :class:`ppsim.snapshot.TimeUpdate`
                 snapshot will be created to print updates with the current time.
                 Defaults to True.
@@ -594,6 +607,7 @@ class Simulation:
         end_time = None
         # stop_condition() returns True when it is time to stop
         if run_until is None:
+
             def stop_condition():
                 return self.simulator.silent
         elif isinstance(run_until, (float, int)):
@@ -606,7 +620,7 @@ class Simulation:
             def stop_condition():
                 return run_until(self.config_dict)
         else:
-            raise TypeError('run_until must be a float, int, function, or None.')
+            raise TypeError("run_until must be a float, int, function, or None.")
 
         # Stop if stop_condition is already met
         if self.silent() or stop_condition():
@@ -619,11 +633,11 @@ class Simulation:
             else:
                 length = history_interval
             if length <= 0:
-                raise ValueError('history_interval must always be strictly positive.')
+                raise ValueError("history_interval must always be strictly positive.")
             return self.time + length
 
         if stopping_interval <= 0:
-            raise ValueError('stopping_interval must always be strictly positive.')
+            raise ValueError("stopping_interval must always be strictly positive.")
 
         next_history_time = get_next_history_time()
 
@@ -644,22 +658,24 @@ class Simulation:
         # add max_wall_clock to be the minimum snapshot update time, to put a time bound on calls to simulator.run
         max_wallclock_time = [min([s.update_time for s in self.snapshots])] if len(self.snapshots) > 0 else []
         while not self.silent() and not stop_condition():
-        # while not stop_condition(): # XXX: this while condition was from the Cython implementation; 
-                                      # not sure why it didn't cause a bug there
+            # while not stop_condition(): # XXX: this while condition was from the Cython implementation;
+            # not sure why it didn't cause a bug there
             if self.time >= next_time:
                 next_time = get_next_time()
                 next_step = self.time_to_steps(next_time)
             current_step = self.simulator.t
             # the next line is overly clever: max_wallclock_time is a list of length 1 or 0;
             # if 0, the default value is used; if 1, the value is used with the * unpacking operator
-            if self.simulator_method.lower() == 'crn':
+            if self.simulator_method.lower() == "crn":
                 self.simulator.run(next_time, 10000)
                 # print(f"First thing: {self.simulator.continuous_time} and {max_wallclock_time}") # type: ignore
                 # print(f"Second thing: {next_time}")
                 # print(f"Third thing: {self.simulator.config}")
-                simulator_time = self.simulator.continuous_time # type: ignore
-                assert simulator_time == next_time, "Haven't yet implemented behavior when crn simulation runs past max_wallclock_time, " +\
-                f"and simulator time {simulator_time} does not match expected time {next_time}"
+                simulator_time = self.simulator.continuous_time  # type: ignore
+                assert simulator_time == next_time, (
+                    "Haven't yet implemented behavior when crn simulation runs past max_wallclock_time, "
+                    + f"and simulator time {simulator_time} does not match expected time {next_time}"
+                )
                 self.time = next_time
             else:
                 self.simulator.run(next_step, *max_wallclock_time)
@@ -668,12 +684,15 @@ class Simulation:
                 elif self.simulator.t < next_step:
                     # simulator exited early from hitting max_wallclock_time
                     # add a fraction of the time until next_time equal to the fractional progress made by simulator
-                    self.time += (next_time - self.time) * (self.simulator.t - current_step) / (next_step - current_step)
+                    self.time += (
+                        (next_time - self.time) * (self.simulator.t - current_step) / (next_step - current_step)
+                    )
                 else:
-                    raise RuntimeError(f'The simulator ran to step {self.simulator.t} past the next step {next_step}.')
+                    raise RuntimeError(f"The simulator ran to step {self.simulator.t} past the next step {next_step}.")
             if self.time >= next_history_time:
-                assert self.time == next_history_time, \
-                    f'self.time = {self.time} overshot next_history_time = {next_history_time}'
+                assert self.time == next_history_time, (
+                    f"self.time = {self.time} overshot next_history_time = {next_history_time}"
+                )
                 self.add_config()
                 next_history_time = get_next_history_time()
             for snapshot in self.snapshots:
@@ -704,9 +723,11 @@ class Simulation:
         Only works with simulator method multibatch, otherwise will raise a ValueError.
         """
         w = max([len(str(state)) for state in self.state_list])
-        reactions = [self._reaction_string(r, p, w) for (r, p) in
-                     zip(self.simulator.reactions, self.simulator.reaction_probabilities)]
-        return '\n'.join(reactions)
+        reactions = [
+            self._reaction_string(r, p, w)
+            for (r, p) in zip(self.simulator.reactions, self.simulator.reaction_probabilities)
+        ]
+        return "\n".join(reactions)
 
     @property
     def enabled_reactions(self) -> str:
@@ -725,16 +746,16 @@ class Simulation:
             r = self.simulator.reactions[self.simulator.enabled_reactions[i]]
             p = self.simulator.reaction_probabilities[self.simulator.enabled_reactions[i]]
             reactions.append(self._reaction_string(r, p, w))
-        return '\n'.join(reactions)
+        return "\n".join(reactions)
 
     def _reaction_string(self, reaction, p: float = 1, w: int = 1) -> str:
         """A string representation of a reaction."""
 
         reactants = [self.state_list[i] for i in sorted(reaction[0:2])]
         products = [self.state_list[i] for i in sorted(reaction[2:])]
-        s = '{0}, {1}  -->  {2}, {3}'.format(*[str(x).rjust(w) for x in reactants + products])
+        s = "{0}, {1}  -->  {2}, {3}".format(*[str(x).rjust(w) for x in reactants + products])
         if p < 1:
-            s += f'      with probability {p}'
+            s += f"      with probability {p}"
         return s
 
     # TODO: If this changes n, then the timescale must change
@@ -754,8 +775,9 @@ class Simulation:
         self.configs = [config]
         self.times = [0]
         self.time = 0
-        self._history = pd.DataFrame(data=self.configs, index=pd.Index(self.times, name='time'),
-                                     columns=self._history.columns)
+        self._history = pd.DataFrame(
+            data=self.configs, index=pd.Index(self.times, name="time"), columns=self._history.columns
+        )
         self.simulator.reset(config)
 
     # TODO: If this changes n, then the timescale must change
@@ -796,8 +818,11 @@ class Simulation:
         The current configuration, as a dictionary mapping states to counts.
         """
         # return {self.state_list[i]: self.simulator.config[i] for i in np.nonzero(self.simulator.config)[0]}
-        return {self.state_list[state_idx]: self.simulator.config[state_idx]
-                for state_idx in range(len(self.simulator.config)) if self.simulator.config[state_idx] > 0}
+        return {
+            self.state_list[state_idx]: self.simulator.config[state_idx]
+            for state_idx in range(len(self.simulator.config))
+            if self.simulator.config[state_idx] > 0
+        }
 
     @property
     def config_array(self) -> np.ndarray:
@@ -814,15 +839,18 @@ class Simulation:
         """A pandas dataframe containing the history of all recorded configurations."""
         h = len(self._history)
         if h < len(self.configs):
-            new_history = pd.DataFrame(data=self.configs[h:], index=pd.Index(self.times_in_units(self.times[h:])),
-                                       columns=self._history.columns)
+            new_history = pd.DataFrame(
+                data=self.configs[h:],
+                index=pd.Index(self.times_in_units(self.times[h:])),
+                columns=self._history.columns,
+            )
             self._history = pd.concat([self._history, new_history])
             if self.time_units is None:
                 if self.continuous_time:
-                    self._history.index.name = 'time (continuous units)'
+                    self._history.index.name = "time (continuous units)"
                 else:
                     n = "n" if self.n == self.steps_per_time_unit else str(self.steps_per_time_unit)
-                    self._history.index.name = f'time ({n} interactions)'
+                    self._history.index.name = f"time ({n} interactions)"
         return self._history
 
     @property
@@ -850,10 +878,12 @@ class Simulation:
         self.times.append(self.time)
 
         self.discrete_batched_steps_total.append(self.simulator.discrete_batched_steps_total)
-        self.discrete_batched_steps_no_passives.append( self.simulator.discrete_batched_steps_no_passives)
+        self.discrete_batched_steps_no_passives.append(self.simulator.discrete_batched_steps_no_passives)
 
         self.discrete_batched_steps_total_last_run.append(self.simulator.discrete_batched_steps_total_last_run)
-        self.discrete_batched_steps_no_passives_last_run.append( self.simulator.discrete_batched_steps_no_passives_last_run)
+        self.discrete_batched_steps_no_passives_last_run.append(
+            self.simulator.discrete_batched_steps_no_passives_last_run
+        )
 
     def set_snapshot_time(self, time: float) -> None:
         """Updates all snapshots to the nearest recorded configuration to a specified time.
@@ -885,7 +915,7 @@ class Simulation:
         snap.update()
         self.snapshots.append(snap)
 
-    def snapshot_slider(self, var: str = 'index') -> "Any":
+    def snapshot_slider(self, var: str = "index") -> "Any":
         """Returns a slider that updates all :class:`ppsim.snapshot.Snapshot` objects.
 
         Returns a slider from the ipywidgets library.
@@ -894,18 +924,19 @@ class Simulation:
             var: What variable the slider uses, either ``'index'`` or ``'time'``.
         """
         import ipywidgets as widgets  # type: ignore
-        if var.lower() == 'index':
-            return widgets.interactive(self.set_snapshot_index,
-                                       index=widgets.IntSlider(min=0,
-                                                               max=len(self.times) - 1,
-                                                               layout=widgets.Layout(width='100%'),
-                                                               step=1))
-        elif var.lower() == 'time':
-            return widgets.interactive(self.set_snapshot_time,
-                                       time=widgets.FloatSlider(min=self.times[0],
-                                                                max=self.times[-1],
-                                                                layout=widgets.Layout(width='100%'),
-                                                                step=0.01))
+
+        if var.lower() == "index":
+            return widgets.interactive(
+                self.set_snapshot_index,
+                index=widgets.IntSlider(min=0, max=len(self.times) - 1, layout=widgets.Layout(width="100%"), step=1),
+            )
+        elif var.lower() == "time":
+            return widgets.interactive(
+                self.set_snapshot_time,
+                time=widgets.FloatSlider(
+                    min=self.times[0], max=self.times[-1], layout=widgets.Layout(width="100%"), step=0.01
+                ),
+            )
         else:
             raise ValueError("var must be either 'index' or 'time'.")
 
@@ -927,7 +958,7 @@ class Simulation:
         samples = []
         t = self.simulator.t
         for _ in tqdm(range(num_samples)):
-            if self.simulator_method.lower() == 'crn':
+            if self.simulator_method.lower() == "crn":
                 self.simulator.reset(np.array(self.configs[-1], dtype=np.uint), t)
                 end_time = t + time
                 self.simulator.run(end_time)
@@ -937,16 +968,18 @@ class Simulation:
                 end_step = t + self.time_to_steps(time)
                 self.simulator.run(end_step)
                 samples.append(np.array(self.simulator.config))
-        return pd.DataFrame(data=samples, index=pd.Index(range(num_samples), name='trial #'),
-                            columns=self._history.columns)
+        return pd.DataFrame(
+            data=samples, index=pd.Index(range(num_samples), name="trial #"), columns=self._history.columns
+        )
 
     def __getstate__(self):
         """Returns information to be pickled."""
         # Clear _history such that it can be regenerated by self.history
         d = dict(self.__dict__)
-        d['_history'] = pd.DataFrame(data=self.configs[0:1], index=pd.Index(self.times_in_units(self.times[0:1])),
-                                     columns=self._history.columns)
-        del d['simulator']
+        d["_history"] = pd.DataFrame(
+            data=self.configs[0:1], index=pd.Index(self.times_in_units(self.times[0:1])), columns=self._history.columns
+        )
+        del d["simulator"]
         return d
 
     def __setstate__(self, state) -> None:
@@ -959,13 +992,14 @@ InitialCondition: TypeAlias = dict[State, int]
 
 
 def time_trials(
-        rule: Rule, ns: list[int],
-        initial_conditions: Callable[[int], InitialCondition] | list[InitialCondition],
-        convergence_condition: ConvergenceDetector | None = None,
-        convergence_check_interval: float = 0.1,
-        num_trials: int = 100,
-        max_wallclock_time: float = 60 * 60 * 24,
-        **kwargs
+    rule: Rule,
+    ns: list[int],
+    initial_conditions: Callable[[int], InitialCondition] | list[InitialCondition],
+    convergence_condition: ConvergenceDetector | None = None,
+    convergence_check_interval: float = 0.1,
+    num_trials: int = 100,
+    max_wallclock_time: float = 60 * 60 * 24,
+    **kwargs,
 ) -> pd.DataFrame:
     """Gathers data about the convergence time of a rule.
 
@@ -1000,7 +1034,7 @@ def time_trials(
         ``'n''`` and ``'time'``. A good way to visualize this dataframe is using the
         seaborn library, calling ``sns.lineplot(x='n', y='time', data=df)``.
     """
-    d: dict[str, list[float]] = {'n': [], 'time': []}
+    d: dict[str, list[float]] = {"n": [], "time": []}
     end_time = perf_counter() + max_wallclock_time
     if callable(initial_conditions):
         initial_conditions = [initial_conditions(n) for n in ns]
@@ -1013,7 +1047,7 @@ def time_trials(
             j += 1
             sim.reset(initial_conditions[i])
             sim.run(convergence_condition, stopping_interval=convergence_check_interval, timer=False)
-            d['n'].append(ns[i])
-            d['time'].append(sim.time)
+            d["n"].append(ns[i])
+            d["time"].append(sim.time)
 
     return pd.DataFrame(data=d)

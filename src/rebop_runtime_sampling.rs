@@ -75,8 +75,7 @@ fn main() {
         crn.F = n / 2;
         let end_time = 1.0;
 
-        let filename =
-            format!("data/lotka_volterra_time1_times_rebop_rust_alternate_nameaaaaa.json");
+        let filename = format!("data/lotka_volterra_time1_times_rebop_rust_alternate_nameaaaaa.json");
         println!("Writing results to {filename}");
 
         crn.t = 0.0;
@@ -84,9 +83,7 @@ fn main() {
         crn.advance_until(end_time);
         let elapsed = start_time.elapsed().as_secs_f64();
         elapsed_times.push((n, elapsed));
-        println!(
-            "{elapsed} seconds to run LV with rebop to time {end_time} with n=10^{pop_exponent}"
-        );
+        println!("{elapsed} seconds to run LV with rebop to time {end_time} with n=10^{pop_exponent}");
 
         let json_data = json!(elapsed_times);
         // write to file

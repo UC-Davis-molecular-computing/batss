@@ -89,9 +89,7 @@ class Snapshot(ABC):
         should go here.
         """
         if self.simulation is None:
-            raise ValueError(
-                "self.simulation is None, cannot call self.initialize until using sim.add_snapshot"
-            )
+            raise ValueError("self.simulation is None, cannot call self.initialize until using sim.add_snapshot")
 
     def update(self, index: int | None = None) -> None:
         """Method which is called while :data:`Snapshot.simulation` is running.
@@ -103,9 +101,7 @@ class Snapshot(ABC):
                 configuration :meth:`ppsim.simulation.Simulation.config_array` and current time.
         """
         if self.simulation is None:
-            raise ValueError(
-                "self.simulation is None, cannot call self.update until using sim.add_snapshot"
-            )
+            raise ValueError("self.simulation is None, cannot call self.update until using sim.add_snapshot")
         if index is not None:
             self.time = self.simulation.times[index]
             self.config = self.simulation.configs[index]
@@ -133,13 +129,9 @@ class TimeUpdate(Snapshot):
     The starting time of the simulation.
     """
 
-    def __init__(
-        self, time_bound: float | None = None, update_time: float = 0.2
-    ) -> None:
+    def __init__(self, time_bound: float | None = None, update_time: float = 0.2) -> None:
         super().__init__(update_time)
-        self.pbar = tqdm(
-            total=time_bound, position=0, leave=False, unit=" time simulated"
-        )
+        self.pbar = tqdm(total=time_bound, position=0, leave=False, unit=" time simulated")
         self.start_time = 0
 
     def initialize(self) -> None:
@@ -228,17 +220,12 @@ class Plotter(Snapshot):
         assert self.simulation is not None
 
         for state in self.simulation.state_list:
-            if (
-                self.state_map(state) is not None
-                and self.state_map(state) not in self.categories
-            ):
+            if self.state_map(state) is not None and self.state_map(state) not in self.categories:
                 self.categories.append(self.state_map(state))
         self.categories = natsorted(self.categories, key=lambda x: repr(x))
 
         categories_dict = {j: i for i, j in enumerate(self.categories)}
-        self._matrix = np.zeros(
-            (len(self.simulation.state_list), len(self.categories)), dtype=np.int64
-        )
+        self._matrix = np.zeros((len(self.simulation.state_list), len(self.categories)), dtype=np.int64)
         for i, state in enumerate(self.simulation.state_list):
             m = self.state_map(state)
             if m is not None:
@@ -266,9 +253,7 @@ class StatePlotter(Plotter):
         assert self.fig is not None
         import seaborn as sns
 
-        self.ax = sns.barplot(
-            x=[str(c) for c in self.categories], y=np.zeros(len(self.categories))
-        )
+        self.ax = sns.barplot(x=[str(c) for c in self.categories], y=np.zeros(len(self.categories)))
         assert self.ax is not None
         # rotate the x-axis labels if any of the label strings have more than 2 characters
         if max([len(str(c)) for c in self.categories]) > 2:

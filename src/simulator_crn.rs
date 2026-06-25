@@ -31,8 +31,8 @@ use crate::simulator_abstract::Simulator;
 
 use crate::urn::Urn;
 use crate::util::{
-    binomial_as_f64, f128_to_decimal, ln_f128, ln_factorial, ln_gamma,
-    ln_gamma_manual_high_precision, ln_gamma_small_rational, multinomial_sample,
+    binomial_as_f64, f128_to_decimal, ln_f128, ln_factorial, ln_gamma, ln_gamma_manual_high_precision,
+    ln_gamma_small_rational, multinomial_sample,
 };
 
 type State = usize;
@@ -86,8 +86,7 @@ impl UniformCRN {
         let g = first_reaction.1.len() - o;
         let mut all_species_seen: HashSet<State> = HashSet::from([k, w]);
         let mut highest_species_seen = k.max(w);
-        let mut collected_reactions: HashMap<StateList, Vec<ProductsAndRateConstant>> =
-            HashMap::new();
+        let mut collected_reactions: HashMap<StateList, Vec<ProductsAndRateConstant>> = HashMap::new();
         for reaction in reactions {
             assert!(
                 reaction.0.len() == o,
@@ -137,10 +136,7 @@ impl UniformCRN {
     /// We need to rebuild these tables because reaction propensities depend on the count of K,
     /// which we may want to change throughout the execution.
     /// Returns a tuple of these three objects in that order.
-    fn construct_transition_arrays(
-        &mut self,
-        k_count: u64,
-    ) -> (ArrayD<usize>, Vec<StateList>, Vec<f64>) {
+    fn construct_transition_arrays(&mut self, k_count: u64) -> (ArrayD<usize>, Vec<StateList>, Vec<f64>) {
         flame::start("construct_transition_arrays");
         let mut max_total_adjusted_rate_constant: f64 = 0.0;
         // Iterate through reactions, adjusting rate constants to account for how many K
@@ -157,8 +153,7 @@ impl UniformCRN {
             // algorithm chooses reactants one at a time, so e.g. there are twice as many ways
             // to choose an 'A' and a 'B' compared to an 'A' and an 'A', as either could be first.
             // We correct for those factors here.
-            let artificial_speedup_factor: f64 =
-                k_count_correction_factor as f64 / symmetry_degree as f64;
+            let artificial_speedup_factor: f64 = k_count_correction_factor as f64 / symmetry_degree as f64;
             let mut total_rate_constant = 0.0;
             for output in &reaction.outputs {
                 total_rate_constant += output.1;
@@ -195,11 +190,9 @@ impl UniformCRN {
             let reactants = &reaction.reactants;
             let symmetry_degree = Self::symmetry_degree(reactants);
             let k_count_correction_factor = self.k_count_correction_factor(reactants, k_count);
-            let artificial_speedup_factor =
-                k_count_correction_factor as f64 / symmetry_degree as f64;
+            let artificial_speedup_factor = k_count_correction_factor as f64 / symmetry_degree as f64;
             for output in &reaction.outputs {
-                let probability =
-                    (output.1 / artificial_speedup_factor) / max_total_adjusted_rate_constant;
+                let probability = (output.1 / artificial_speedup_factor) / max_total_adjusted_rate_constant;
                 random_outputs.push(output.0.clone());
                 random_probabilities.push(probability);
                 for permutation in reaction.reactants.iter().permutations(self.o).unique() {
@@ -463,14 +456,10 @@ impl SimulatorCRNMultiBatch {
         let transition_probabilities = Vec::new();
         let python_code = c_str!(include_str!("sample_coll.py"));
         let python_module = Python::with_gil(|py| {
-            let module: Py<PyModule> = PyModule::from_code(
-                py,
-                python_code,
-                c_str!("sample.py"),
-                c_str!("sample_module"),
-            )
-            .unwrap()
-            .into();
+            let module: Py<PyModule> =
+                PyModule::from_code(py, python_code, c_str!("sample.py"), c_str!("sample_module"))
+                    .unwrap()
+                    .into();
 
             module
         });
@@ -540,14 +529,14 @@ impl SimulatorCRNMultiBatch {
                     let mut gillespie_config: Vec<isize> = vec![0; self.q - 2];
                     let mut species_index = 0;
                     // Keep track of how species correspond since we need to ignore K and W.
-                    let mut batching_index_to_gillespie_index: HashMap<usize, usize> =
-                        HashMap::new();
+                    let mut batching_index_to_gillespie_index: HashMap<usize, usize> = HashMap::new();
                     // Iterate through species skipping k and w so that they appear in
                     // the same order in the rebop Gillespie object.
                     for i in 0..self.q {
                         if i == self.crn.k || i == self.crn.w {
                             continue;
                         }
+
                         batching_index_to_gillespie_index.insert(i, species_index);
                         gillespie_config[species_index] = self.urn.config[i] as isize;
                         species_index += 1;
@@ -556,8 +545,7 @@ impl SimulatorCRNMultiBatch {
                     // See https://github.com/Armavica/rebop/pull/35 for a discussion.
                     // I think the kinds of CRNs that this system is good at simulating,
                     // will typically not be sparse, but that might not be true.
-                    let mut gillespie =
-                        Gillespie::new_with_seed(gillespie_config, false, self.rng.next_u64());
+                    let mut gillespie = Gillespie::new_with_seed(gillespie_config, false, self.rng.next_u64());
                     // Put the reactions into the Gillespie object.
                     for reaction in &self.crn.reactions {
                         let mut rebop_reaction_inputs = vec![0; self.q - 2];
@@ -567,20 +555,16 @@ impl SimulatorCRNMultiBatch {
                             if *reactant == self.crn.k {
                                 continue;
                             }
-                            rebop_reaction_inputs[batching_index_to_gillespie_index[&reactant]] +=
-                                1;
-                            rebop_reaction_base_net_productions
-                                [batching_index_to_gillespie_index[&reactant]] -= 1;
+                            rebop_reaction_inputs[batching_index_to_gillespie_index[&reactant]] += 1;
+                            rebop_reaction_base_net_productions[batching_index_to_gillespie_index[&reactant]] -= 1;
                         }
                         for possible_output in &reaction.outputs {
-                            let mut rebop_reaction_net_productions =
-                                rebop_reaction_base_net_productions.clone();
+                            let mut rebop_reaction_net_productions = rebop_reaction_base_net_productions.clone();
                             for output_species in &possible_output.0 {
                                 if *output_species == self.crn.k || *output_species == self.crn.w {
                                     continue;
                                 }
-                                rebop_reaction_net_productions
-                                    [batching_index_to_gillespie_index[&output_species]] += 1;
+                                rebop_reaction_net_productions[batching_index_to_gillespie_index[&output_species]] += 1;
                             }
                             gillespie.add_reaction(
                                 Rate::lma(possible_output.1, &rebop_reaction_inputs),
@@ -603,8 +587,7 @@ impl SimulatorCRNMultiBatch {
                         if i == self.crn.k {
                             gillespie_config[i] = self.urn.config[i];
                         }
-                        gillespie_config[i] =
-                            self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
+                        gillespie_config[i] = self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
                         species_index += 1;
                     }
                     self.urn.reset_config(&gillespie_config);
@@ -612,8 +595,7 @@ impl SimulatorCRNMultiBatch {
                 }
                 self.batch_step(t_max);
                 let current_k_count = self.urn.config[self.crn.k];
-                if (current_k_count.min(self.n) as f64) / (current_k_count.max(self.n) as f64)
-                    < K_COUNT_RATIO_THRESHOLD
+                if (current_k_count.min(self.n) as f64) / (current_k_count.max(self.n) as f64) < K_COUNT_RATIO_THRESHOLD
                 {
                     self.reset_k_count();
                 }
@@ -675,8 +657,7 @@ impl SimulatorCRNMultiBatch {
         let old_k_count = self.urn.config[self.crn.k];
         self.urn.reset_config(&config);
         self.n_including_extra_species = self.urn.size;
-        self.n = self.n_including_extra_species
-            - (self.urn.config[self.crn.k] + self.urn.config[self.crn.w]);
+        self.n = self.n_including_extra_species - (self.urn.config[self.crn.k] + self.urn.config[self.crn.w]);
         if old_k_count != config[self.crn.k] {
             // If the count of k changed during the simulation, we need to do the expensive operation
             // of recomputing transition arrays.
@@ -778,8 +759,7 @@ impl SimulatorCRNMultiBatch {
         assert!(batch_size > 0);
         // For now, we're just gonna do the geometric mean thing.
         let first_term = 1.0 / self.get_exponential_rate(initial_n);
-        let last_term =
-            1.0 / self.get_exponential_rate(initial_n + self.crn.g as u64 * (batch_size - 1));
+        let last_term = 1.0 / self.get_exponential_rate(initial_n + self.crn.g as u64 * (batch_size - 1));
         let prod = first_term * last_term;
         assert!(prod > 0.0);
         let geom_mean = prod.sqrt();
@@ -808,8 +788,7 @@ impl SimulatorCRNMultiBatch {
     pub fn sample_hypo_directly(&mut self, initial_n: u64, batch_size: u64) -> f64 {
         let mut answer = 0.0;
         for i in 0..batch_size {
-            answer += self
-                .sample_exponential(self.get_exponential_rate(initial_n + i * self.crn.g as u64));
+            answer += self.sample_exponential(self.get_exponential_rate(initial_n + i * self.crn.g as u64));
         }
         return answer;
     }
@@ -849,8 +828,7 @@ impl SimulatorCRNMultiBatch {
             let mut num_ways_to_choose_these_reactants_in_order = 1.0;
             for reactant in reactants {
                 *num_times_seen.entry(reactant).or_default() += 1;
-                let num_copies_of_next_reactant =
-                    self.urn.config[reactant] - num_times_seen[&reactant] - 1;
+                let num_copies_of_next_reactant = self.urn.config[reactant] - num_times_seen[&reactant] - 1;
                 num_ways_to_choose_these_reactants_in_order *= num_copies_of_next_reactant as f64;
                 num_ways_to_choose_these_reactants_in_order /= num_times_seen[&reactant] as f64;
             }
@@ -863,21 +841,19 @@ impl SimulatorCRNMultiBatch {
                 // Passive reaction.
                 total_passive_probability_mass += num_ways_to_choose_these_reactants_in_order;
             } else {
-                let probabilities =
-                    self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
+                let probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
                 total_passive_probability_mass +=
                     non_passive_probability_sum * num_ways_to_choose_these_reactants_in_order;
-                total_non_passive_probability_mass += (1.0 - non_passive_probability_sum)
-                    * num_ways_to_choose_these_reactants_in_order;
+                total_non_passive_probability_mass +=
+                    (1.0 - non_passive_probability_sum) * num_ways_to_choose_these_reactants_in_order;
             }
         }
         assert!(
             done,
             "self.random_transitions finished iterating before self.array_sums"
         );
-        let total_probability_mass =
-            total_passive_probability_mass + total_non_passive_probability_mass;
+        let total_probability_mass = total_passive_probability_mass + total_non_passive_probability_mass;
         total_non_passive_probability_mass / total_probability_mass
     }
 }
@@ -1037,10 +1013,7 @@ impl NDBatchResult {
     /// done: true iff this is the last entry in the NDBatchResult.
     /// TODO this should probably implement an iterable trait
     fn get_next(&mut self) -> (Vec<State>, u64, bool) {
-        assert!(
-            self.curr_species < self.q,
-            "NDBatchResult iterated past final species"
-        );
+        assert!(self.curr_species < self.q, "NDBatchResult iterated past final species");
         let mut done = false;
         if self.dimensions == 1 {
             // flame::start("base case processing");
@@ -1114,9 +1087,8 @@ impl SimulatorCRNMultiBatch {
             self.continuous_time += batch_time;
             // It's possible that all of the reactions *except* the collision happen before t_max,
             // but then the collision happens after t_max.
-            let collision_time = self.sample_exponential(
-                self.get_exponential_rate(self.n_including_extra_species + self.crn.g as u64 * l),
-            );
+            let collision_time = self
+                .sample_exponential(self.get_exponential_rate(self.n_including_extra_species + self.crn.g as u64 * l));
             if self.continuous_time + collision_time < t_max {
                 self.continuous_time += collision_time;
             } else {
@@ -1159,8 +1131,7 @@ impl SimulatorCRNMultiBatch {
         // both be indexed by q^o-tuples when iterated through this way, and the iteration order should
         // be lexicographic for both of them.
         flame::start("sample batch");
-        self.array_sums
-            .sample_batch_result(rxns_before_coll, &mut self.urn);
+        self.array_sums.sample_batch_result(rxns_before_coll, &mut self.urn);
         flame::end("sample batch");
 
         let initial_t_including_passives = self.discrete_batched_steps_total;
@@ -1206,8 +1177,7 @@ impl SimulatorCRNMultiBatch {
                 // We'll add this for now, then subtract off the probabilistically passive reactions later.
                 self.discrete_batched_steps_no_passives += quantity;
                 self.discrete_batched_steps_no_passives_last_run += quantity;
-                let mut probabilities =
-                    self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
+                let mut probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
                 if non_passive_probability_sum < 1.0 {
                     probabilities.push(1.0 - non_passive_probability_sum);
@@ -1229,8 +1199,7 @@ impl SimulatorCRNMultiBatch {
                     let idx = first_idx + offset;
                     let outputs = &self.random_outputs[idx];
                     for output in outputs {
-                        self.updated_counts
-                            .add_to_entry(*output, self.m[offset] as i64);
+                        self.updated_counts.add_to_entry(*output, self.m[offset] as i64);
                     }
                 }
                 // Add any W produced by passive reactions, and add those reactants to updated_counts.
@@ -1239,8 +1208,7 @@ impl SimulatorCRNMultiBatch {
                     self.updated_counts
                         .add_to_entry(self.crn.w, (passive_count * self.crn.g as u64) as i64);
                     for reactant in reactants {
-                        self.updated_counts
-                            .add_to_entry(reactant, passive_count as i64);
+                        self.updated_counts.add_to_entry(reactant, passive_count as i64);
                     }
                     self.discrete_batched_steps_no_passives -= passive_count;
                     self.discrete_batched_steps_no_passives_last_run -= passive_count;
@@ -1281,14 +1249,10 @@ impl SimulatorCRNMultiBatch {
             // 1 reactant that has already been touched, or exactly 2, up to exactly o.
             for num_updated_reactants_in_collision in 1..self.crn.o + 1 {
                 collision_count_num_ways.push(
-                    (num_old_molecules as u128).pow(
-                        (self.crn.o - num_updated_reactants_in_collision)
-                            .try_into()
-                            .unwrap(),
-                    ) * (num_new_molecules as u128)
-                        .pow(num_updated_reactants_in_collision.try_into().unwrap())
-                        * binomial(self.crn.o as u64, num_updated_reactants_in_collision as u64)
-                            as u128,
+                    (num_old_molecules as u128)
+                        .pow((self.crn.o - num_updated_reactants_in_collision).try_into().unwrap())
+                        * (num_new_molecules as u128).pow(num_updated_reactants_in_collision.try_into().unwrap())
+                        * binomial(self.crn.o as u64, num_updated_reactants_in_collision as u64) as u128,
                 );
                 //XXX: note that binomial is from the num_integer crate and returns a u64:
                 // https://docs.rs/num-integer/latest/num_integer/fn.binomial.html
@@ -1297,23 +1261,18 @@ impl SimulatorCRNMultiBatch {
             }
             // TODO: there should be some standard way to sample from this discrete probability distribution.
             // Should be rand::WeightedIndex. Also urn::sample_one.
-            let total_ways_with_at_least_one_collision: u128 =
-                collision_count_num_ways.iter().sum();
+            let total_ways_with_at_least_one_collision: u128 = collision_count_num_ways.iter().sum();
             let u2: f64 = self.rng.sample(StandardUniform);
             let mut num_colliding_molecules = 0;
             let mut total_ways_so_far = 0;
             for i in 0..self.crn.o {
                 total_ways_so_far += collision_count_num_ways[i];
-                if u2 < (total_ways_so_far as f64) / (total_ways_with_at_least_one_collision as f64)
-                {
+                if u2 < (total_ways_so_far as f64) / (total_ways_with_at_least_one_collision as f64) {
                     num_colliding_molecules = i + 1;
                     break;
                 }
             }
-            assert!(
-                num_colliding_molecules > 0,
-                "Failed to sample collision size"
-            );
+            assert!(num_colliding_molecules > 0, "Failed to sample collision size");
             let mut collision: Vec<State> = Vec::with_capacity(self.crn.o);
             for _ in 0..num_colliding_molecules {
                 collision.push(self.updated_counts.sample_one().unwrap());
@@ -1334,11 +1293,7 @@ impl SimulatorCRNMultiBatch {
                 1,
                 "Was not left with 1-dimensional vector after indexing collision"
             );
-            assert_eq!(
-                view.len(),
-                2,
-                "Indexing collision did not leave two-element subarray"
-            );
+            assert_eq!(view.len(), 2, "Indexing collision did not leave two-element subarray");
 
             let (num_outputs, first_idx) = (view[0], view[1]);
             // TODO: this code is heavily copy-pasted. See other TODO comment above.
@@ -1347,24 +1302,17 @@ impl SimulatorCRNMultiBatch {
                 for reactant in collision {
                     self.updated_counts.add_to_entry(reactant, 1);
                 }
-                self.updated_counts
-                    .add_to_entry(self.crn.w, (self.crn.g) as i64);
+                self.updated_counts.add_to_entry(self.crn.w, (self.crn.g) as i64);
             } else {
                 self.discrete_batched_steps_no_passives += 1;
                 self.discrete_batched_steps_no_passives_last_run += 1;
-                let mut probabilities =
-                    self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
+                let mut probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
                 if non_passive_probability_sum < 1.0 {
                     probabilities.push(1.0 - non_passive_probability_sum);
                 }
                 flame::start("multinomial sample");
-                multinomial_sample(
-                    1,
-                    &probabilities,
-                    &mut self.m[0..probabilities.len()],
-                    &mut self.rng,
-                );
+                multinomial_sample(1, &probabilities, &mut self.m[0..probabilities.len()], &mut self.rng);
                 flame::end("multinomial sample");
                 assert_eq!(
                     self.m[0..probabilities.len()].iter().sum::<u64>(),
@@ -1384,8 +1332,7 @@ impl SimulatorCRNMultiBatch {
                     self.updated_counts
                         .add_to_entry(self.crn.w, (passive_count * self.crn.g as u64) as i64);
                     for reactant in collision {
-                        self.updated_counts
-                            .add_to_entry(reactant, passive_count as i64);
+                        self.updated_counts.add_to_entry(reactant, passive_count as i64);
                     }
                     self.discrete_batched_steps_no_passives -= passive_count;
                     self.discrete_batched_steps_no_passives_last_run -= passive_count;
@@ -1418,9 +1365,7 @@ impl SimulatorCRNMultiBatch {
             "Count of K should never change within running a batch."
         );
         self.n_including_extra_species = self.urn.size;
-        self.n = self.n_including_extra_species
-            - self.urn.config[self.crn.k]
-            - self.urn.config[self.crn.w];
+        self.n = self.n_including_extra_species - self.urn.config[self.crn.k] - self.urn.config[self.crn.w];
 
         //self.update_enabled_reactions();
     }
@@ -1474,8 +1419,7 @@ impl SimulatorCRNMultiBatch {
             // at least O(sqrt n) reactions until it's worth turning on batching again.
             let num_steps_to_take = self.n.sqrt();
             let time_to_run_gillespie = time_per_step * num_steps_to_take as f64;
-            let time_to_run_gillespie_until =
-                (cur_gillespie_time + time_to_run_gillespie).min(t_max);
+            let time_to_run_gillespie_until = (cur_gillespie_time + time_to_run_gillespie).min(t_max);
             self.gillespie
                 .as_mut()
                 .unwrap()
@@ -1595,8 +1539,7 @@ impl SimulatorCRNMultiBatch {
         } else {
             f128::NAN
         };
-        let ln_gamma_diff =
-            ln_gamma_manual_high_precision((self.n_including_extra_species + 1 - r) as f128);
+        let ln_gamma_diff = ln_gamma_manual_high_precision((self.n_including_extra_species + 1 - r) as f128);
         // lhs tracks all of the terms that don't include t, i.e., those that we don't need to
         // update each iteration of binary search.
 
@@ -1617,8 +1560,7 @@ impl SimulatorCRNMultiBatch {
                 // = 4*log(3) + lgamma(14/3) - lgamma(2/3).
                 // These three terms are the three terms that are added and subtracted from lhs, to
                 // account for the term log((n-g-j)!(g)).
-                let num_static_terms: u64 = (((self.n_including_extra_species - j as u64) as f64
-                    - self.crn.g as f64)
+                let num_static_terms: u64 = (((self.n_including_extra_species - j as u64) as f64 - self.crn.g as f64)
                     / self.crn.g as f64)
                     .ceil() as u64;
                 lhs += num_static_terms as f128 * ln_g;
@@ -1626,9 +1568,7 @@ impl SimulatorCRNMultiBatch {
                     ((self.n_including_extra_species - j as u64) as f128) / (self.crn.g as f128),
                 );
                 lhs -= ln_gamma_small_rational(
-                    (self.n_including_extra_species
-                        - (num_static_terms * self.crn.g as u64)
-                        - j as u64) as usize,
+                    (self.n_including_extra_species - (num_static_terms * self.crn.g as u64) - j as u64) as usize,
                     self.crn.g,
                 );
             }
@@ -1663,13 +1603,11 @@ impl SimulatorCRNMultiBatch {
             let mut last_lngamma_value: f64 = 0.0;
             if use_high_precision_in_loop {
                 rhs = ln_gamma_manual_high_precision(
-                    (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f128
-                        + 1.0,
+                    (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f128 + 1.0,
                 );
             } else {
-                last_lngamma_value = ln_gamma(
-                    (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f64 + 1.0,
-                );
+                last_lngamma_value =
+                    ln_gamma((self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f64 + 1.0);
                 rhs = last_lngamma_value as f128;
             }
             if self.crn.g > 0 {
@@ -1677,22 +1615,19 @@ impl SimulatorCRNMultiBatch {
                     // Calculates b = ceil((n+g(t-1)-j)/g).
                     // See the comment in the loop above where num_static_terms is defined for an explanation.
                     // This is the same thing, for the term log((n+g(t-1)-j)!(g)).
-                    let num_dynamic_terms = (((self.n_including_extra_species
-                        + (self.crn.g as u64 * (t_mid - 1))
+                    let num_dynamic_terms = (((self.n_including_extra_species + (self.crn.g as u64 * (t_mid - 1))
                         - j as u64) as f64)
                         / self.crn.g as f64)
                         .ceil() as u64;
                     rhs += (num_dynamic_terms as f128) * ln_g;
                     if use_high_precision_in_loop {
                         rhs += ln_gamma_manual_high_precision(
-                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid)
-                                - j as u64) as f128
+                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid) - j as u64) as f128
                                 / self.crn.g as f128,
                         );
                     } else {
                         rhs += ln_gamma(
-                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid)
-                                - j as u64) as f64
+                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid) - j as u64) as f64
                                 / self.crn.g as f64,
                         ) as f128;
                     }
@@ -1709,11 +1644,9 @@ impl SimulatorCRNMultiBatch {
                 // to the population protocols case.
                 for j in 0..self.crn.o {
                     if use_high_precision_in_loop {
-                        rhs += (t_mid as f128)
-                            * ln_f128((self.n_including_extra_species - j as u64) as f128);
+                        rhs += (t_mid as f128) * ln_f128((self.n_including_extra_species - j as u64) as f128);
                     } else {
-                        rhs += (t_mid as f128)
-                            * ((self.n_including_extra_species - j as u64) as f64).ln() as f128;
+                        rhs += (t_mid as f128) * ((self.n_including_extra_species - j as u64) as f64).ln() as f128;
                     }
                 }
             }
@@ -1782,8 +1715,7 @@ impl SimulatorCRNMultiBatch {
     /// Helper function to get the rate of the exponential representing the time to the next reaction
     /// at some particular population size.
     pub fn get_exponential_rate(&self, pop_size: u64) -> f64 {
-        return self.crn.continuous_time_correction_factor
-            * binomial_as_f64(pop_size, self.crn.o as u64);
+        return self.crn.continuous_time_correction_factor * binomial_as_f64(pop_size, self.crn.o as u64);
     }
     /// Sample from an exponential distribution.
     pub fn sample_exponential(&mut self, rate: f64) -> f64 {
@@ -1826,18 +1758,13 @@ impl SimulatorCRNMultiBatch {
                 // = 4*log(3) + lgamma(14/3) - lgamma(2/3).
                 // These three terms are the three terms that are added and subtracted from lhs, to
                 // account for the term log((n-g-j)!(g)).
-                let num_static_terms: f64 = (((self.n_including_extra_species - j as u64) as f64
-                    - self.crn.g as f64)
+                let num_static_terms: f64 = (((self.n_including_extra_species - j as u64) as f64 - self.crn.g as f64)
                     / self.crn.g as f64)
                     .ceil();
                 lhs += num_static_terms * (self.crn.g as f64).ln();
-                lhs += ln_gamma(
-                    (self.n_including_extra_species - j as u64) as f64 / self.crn.g as f64,
-                );
+                lhs += ln_gamma((self.n_including_extra_species - j as u64) as f64 / self.crn.g as f64);
                 lhs -= ln_gamma(
-                    (self.n_including_extra_species as f64
-                        - (num_static_terms * self.crn.g as f64)
-                        - j as f64)
+                    (self.n_including_extra_species as f64 - (num_static_terms * self.crn.g as f64) - j as f64)
                         / self.crn.g as f64,
                 );
             }
@@ -1858,23 +1785,19 @@ impl SimulatorCRNMultiBatch {
             // rhs tracks all of the terms that include t, i.e., those that we need to
             // update each iteration of binary search.
             let mut rhs = KahanBabuskaNeumaier::new();
-            rhs += ln_gamma(
-                (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f64 + 1.0,
-            );
+            rhs += ln_gamma((self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f64 + 1.0);
             if self.crn.g > 0 {
                 for j in 0..self.crn.o {
                     // Calculates b = ceil((n+g(t-1)-j)/g).
                     // See the comment in the loop above where num_static_terms is defined for an explanation.
                     // This is the same thing, for the term log((n+g(t-1)-j)!(g)).
-                    let num_dynamic_terms = (((self.n_including_extra_species
-                        + (self.crn.g as u64 * (t_mid - 1))
+                    let num_dynamic_terms = (((self.n_including_extra_species + (self.crn.g as u64 * (t_mid - 1))
                         - j as u64) as f64)
                         / self.crn.g as f64)
                         .ceil();
                     rhs += num_dynamic_terms * (self.crn.g as f64).ln();
                     rhs += ln_gamma(
-                        (self.n_including_extra_species + (self.crn.g as u64 * t_mid) - j as u64)
-                            as f64
+                        (self.n_including_extra_species + (self.crn.g as u64 * t_mid) - j as u64) as f64
                             / self.crn.g as f64,
                     );
                     rhs -= ln_gamma(
@@ -1953,12 +1876,10 @@ impl SimulatorCRNMultiBatch {
             let mut current_simulated_reactions = done_reactions_at_checkpoint;
             let mut current_simulated_population_size = pop_size_at_checkpoint;
             while current_simulated_reactions < latest_possible_collision_index {
-                let halfway_point =
-                    (latest_possible_collision_index - current_simulated_reactions + 1) / 2;
+                let halfway_point = (latest_possible_collision_index - current_simulated_reactions + 1) / 2;
                 // Check how long it would take to get halfway through the part of the batch
                 // that we have yet to figure out what to do with.
-                let time_to_halfway_point =
-                    self.sample_batch_time(current_simulated_population_size, halfway_point);
+                let time_to_halfway_point = self.sample_batch_time(current_simulated_population_size, halfway_point);
                 // Did it run past the end in that many reactions?
                 if current_simulated_time + time_to_halfway_point > t_max {
                     // If so, then we know that it ran past t_max at some point in this range.

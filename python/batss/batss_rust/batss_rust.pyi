@@ -21,7 +21,7 @@ as integers 0,1,...,num_states-1.
 class Simulator(ABC):
     config: list[RustState]
     """TODO"""
-    
+
     n: int
     """TODO"""
 
@@ -50,23 +50,14 @@ class Simulator(ABC):
         """TODO"""
         ...
 
-    def reset(
-            self,
-            config: npt.NDArray[np.uint],
-            t: int = 0
-    ) -> None: 
+    def reset(self, config: npt.NDArray[np.uint], t: int = 0) -> None:
         """TODO"""
         ...
 
-        
-    def run(
-            self,
-            t_max: int | float,
-            max_wallclock_time: float = 3600.0
-    ) -> None:
+    def run(self, t_max: int | float, max_wallclock_time: float = 3600.0) -> None:
         """
         Run the simulation for a specified number of steps or until max time is reached.
-        
+
         Args:
             t_max: Maximum number of simulation steps to execute or continuous time to simulate
             max_wallclock_time: Maximum wall clock time in seconds before stopping (default: 1 hour)
@@ -74,28 +65,27 @@ class Simulator(ABC):
         ...
 
     def __init__(
-            self,
-            init_config: npt.NDArray[np.uint],
-            delta: npt.NDArray[np.uint] | None,
-            random_transitions: npt.NDArray[np.uint] | None,
-            random_outputs: npt.NDArray[np.uint] | None,
-            transition_probabilities: npt.NDArray[np.float64] | None,
-            transition_order: str | None,
-            gillespie: bool | None = False,
-            seed: int | None = 3,
-            crn = None,
-            k = None,
-            w = None,
+        self,
+        init_config: npt.NDArray[np.uint],
+        delta: npt.NDArray[np.uint] | None,
+        random_transitions: npt.NDArray[np.uint] | None,
+        random_outputs: npt.NDArray[np.uint] | None,
+        transition_probabilities: npt.NDArray[np.float64] | None,
+        transition_order: str | None,
+        gillespie: bool | None = False,
+        seed: int | None = 3,
+        crn=None,
+        k=None,
+        w=None,
     ) -> None:
         """TODO"""
         ...
-
 
 class SimulatorCRNMultiBatch(Simulator):
     """
     Simulator for CRNs using TODO cite paper once citeable.
     """
-    
+
     continuous_time: float
     """TODO"""
 
@@ -107,7 +97,7 @@ class SimulatorCRNMultiBatch(Simulator):
 
     enabled_reactions: list[int]
     """TODO"""
-    
+
     num_enabled_reactions: int
     """TODO"""
 
