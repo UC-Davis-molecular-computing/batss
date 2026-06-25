@@ -527,6 +527,8 @@ impl SimulatorCRNMultiBatch {
         let start_time = Instant::now();
         while self.continuous_time < t_max && start_time.elapsed() < duration {
             if self.silent {
+                // TODO: there should be some more robust behavior here,
+                // in case the user expects the simulator to tell them when it became silent.
                 self.continuous_time = t_max;
                 return Ok(());
             }
