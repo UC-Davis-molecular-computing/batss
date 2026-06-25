@@ -39,7 +39,6 @@ type State = usize;
 type RateConstant = f64;
 type StateList = Vec<State>;
 type Reaction = (StateList, StateList, RateConstant);
-type ProductsAndRateConstant = (StateList, RateConstant);
 // A map from each state that appears to how many times that state appears in this set of reactants.
 
 /// Remembers the CRN we started with, because we may need to recompute reaction
@@ -73,7 +72,7 @@ pub struct UniformCRN {
 #[derive(Debug)]
 pub struct CombinedReactions {
     pub reactants: StateList,
-    pub outputs: Vec<ProductsAndRateConstant>,
+    pub products_and_rate_constants: Vec<(StateList, RateConstant)>,
 }
 
 impl UniformCRN {
@@ -86,7 +85,7 @@ impl UniformCRN {
         let g = first_reaction.1.len() - o;
         let mut all_species_seen: HashSet<State> = HashSet::from([k, w]);
         let mut highest_species_seen = k.max(w);
-        let mut collected_reactions: HashMap<StateList, Vec<ProductsAndRateConstant>> = HashMap::new();
+        let mut collected_reactions: HashMap<StateList, Vec<(StateList, RateConstant)>> = HashMap::new();
         for reaction in reactions {
             assert!(
                 reaction.0.len() == o,
@@ -118,7 +117,7 @@ impl UniformCRN {
             .keys()
             .map(|x| CombinedReactions {
                 reactants: x.to_vec(),
-                outputs: collected_reactions[x].clone(),
+                products_and_rate_constants: collected_reactions[x].clone(),
             })
             .collect();
         return UniformCRN {
@@ -155,7 +154,7 @@ impl UniformCRN {
             // We correct for those factors here.
             let artificial_speedup_factor: f64 = k_count_correction_factor as f64 / symmetry_degree as f64;
             let mut total_rate_constant = 0.0;
-            for output in &reaction.outputs {
+            for output in &reaction.products_and_rate_constants {
                 total_rate_constant += output.1;
             }
             let total_adjusted_rate_constant = total_rate_constant / artificial_speedup_factor;
@@ -191,7 +190,7 @@ impl UniformCRN {
             let symmetry_degree = Self::symmetry_degree(reactants);
             let k_count_correction_factor = self.k_count_correction_factor(reactants, k_count);
             let artificial_speedup_factor = k_count_correction_factor as f64 / symmetry_degree as f64;
-            for output in &reaction.outputs {
+            for output in &reaction.products_and_rate_constants {
                 let probability = (output.1 / artificial_speedup_factor) / max_total_adjusted_rate_constant;
                 random_outputs.push(output.0.clone());
                 random_probabilities.push(probability);
@@ -208,7 +207,7 @@ impl UniformCRN {
                     inner_view[1] = cur_output_index;
                 }
             }
-            cur_output_index += reaction.outputs.len();
+            cur_output_index += reaction.products_and_rate_constants.len();
         }
         flame::end("construct_transition_arrays: second reaction loop");
         assert_eq!(
@@ -412,7 +411,7 @@ impl SimulatorCRNMultiBatch {
         let random_depth = crn
             .reactions
             .iter()
-            .map(|x| x.outputs.len())
+            .map(|x| x.products_and_rate_constants.len())
             .fold(0, |acc, x| acc.max(x));
 
         let continuous_time = 0.0;
@@ -529,7 +528,7 @@ impl SimulatorCRNMultiBatch {
                     let mut gillespie_config: Vec<isize> = vec![0; self.q - 2];
                     let mut species_index = 0;
                     // Keep track of how species correspond since we need to ignore K and W.
-                    let mut batching_index_to_gillespie_index: HashMap<usize, usize> = HashMap::new();
+                    let mut batching_idx_to_gillespie_idx: HashMap<usize, usize> = HashMap::new();
                     // Iterate through species skipping k and w so that they appear in
                     // the same order in the rebop Gillespie object.
                     for i in 0..self.q {
@@ -537,7 +536,7 @@ impl SimulatorCRNMultiBatch {
                             continue;
                         }
 
-                        batching_index_to_gillespie_index.insert(i, species_index);
+                        batching_idx_to_gillespie_idx.insert(i, species_index);
                         gillespie_config[species_index] = self.urn.config[i] as isize;
                         species_index += 1;
                     }
@@ -555,19 +554,21 @@ impl SimulatorCRNMultiBatch {
                             if *reactant == self.crn.k {
                                 continue;
                             }
-                            rebop_reactant_stoichs[batching_index_to_gillespie_index[&reactant]] += 1;
-                            rebop_reaction_base_net_productions[batching_index_to_gillespie_index[&reactant]] -= 1;
+                            let reactant_gillespie_idx = batching_idx_to_gillespie_idx[&reactant];
+                            rebop_reactant_stoichs[reactant_gillespie_idx] += 1;
+                            rebop_reaction_base_net_productions[reactant_gillespie_idx] -= 1;
                         }
-                        for possible_output in &reaction.outputs {
+                        for (products, rate_constant) in &reaction.products_and_rate_constants {
                             let mut rebop_reaction_net_productions = rebop_reaction_base_net_productions.clone();
-                            for output_species in &possible_output.0 {
+                            for output_species in products {
                                 if *output_species == self.crn.k || *output_species == self.crn.w {
                                     continue;
                                 }
-                                rebop_reaction_net_productions[batching_index_to_gillespie_index[&output_species]] += 1;
+                                let output_species_gillespie_idx = batching_idx_to_gillespie_idx[&output_species];
+                                rebop_reaction_net_productions[output_species_gillespie_idx] += 1;
                             }
                             gillespie.add_reaction(
-                                Rate::lma(possible_output.1, &rebop_reactant_stoichs),
+                                Rate::lma(*rate_constant, &rebop_reactant_stoichs),
                                 &rebop_reaction_net_productions,
                             );
                         }
