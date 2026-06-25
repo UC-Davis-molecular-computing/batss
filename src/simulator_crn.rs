@@ -563,6 +563,7 @@ impl SimulatorCRNMultiBatch {
                         let mut rebop_reaction_inputs = vec![0; self.q - 2];
                         let mut rebop_reaction_base_net_productions = vec![0; self.q - 2];
                         for reactant in &reaction.reactants {
+                            assert!(*reactant != self.crn.w, "W should never be a reactant.");
                             if *reactant == self.crn.k {
                                 continue;
                             }
