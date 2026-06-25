@@ -1394,61 +1394,58 @@ impl SimulatorCRNMultiBatch {
     /// we run Gillespie for roughly sqrt(n) steps, and then re-check whether batching
     /// is likely to be faster again.
     fn gillespie_steps(&mut self, t_max: f64) -> () {
-        let original_gillespie_population = self.total_gillespie_population();
+        let original_gillespie_n = self.gillespie_total_population_count();
         assert!(
-            original_gillespie_population == self.n,
+            original_gillespie_n == self.n,
             "self.n ({:?}) does not match gillespie value of n ({:?})",
             self.n,
-            original_gillespie_population
+            original_gillespie_n
         );
         const NUM_CONST_GILLESPIE_STEPS: usize = 30;
-        {
-            // Borrow mutably for as long as we need it, for convenience.
-            let gillespie = self.gillespie.as_mut().unwrap();
-            gillespie.set_time(self.continuous_time);
-            // We'll just run a small constant number of steps, see how much (CRN) time that took,
-            // and use that as an estimate for how long we need to run to get the desired
-            // number of steps. Doing this because I'm not confident whether calling
-            // advance_one_reaction in a loop will be slower than advance_until,
-            // and curerntly the rebop API doesn't have a function to advance a fixed number of steps.
-            let mut last_configuration = vec![0; self.q - 2];
-            for _ in 0..NUM_CONST_GILLESPIE_STEPS {
-                // This is pretty grossly inefficient but, for correctness,
-                // we want to make sure we don't accidentally simulate a reaction past t_max,
-                // so we make sure we can undo if needed.
-                // This loop shouldn't be a big part of runtime anyway.
-                for species in 0..self.q - 2 {
-                    last_configuration[species] = gillespie.get_species(species);
-                }
-                gillespie.advance_one_reaction();
-                if gillespie.get_time() > t_max {
-                    self.continuous_time = t_max;
-                    gillespie.set_species(last_configuration);
-                    break;
-                }
+
+        // Borrow mutably for as long as we need it, for convenience.
+        let gillespie = self.gillespie.as_mut().unwrap();
+        gillespie.set_time(self.continuous_time);
+        // We'll just run a small constant number of steps, see how much (CRN) time that took,
+        // and use that as an estimate for how long we need to run to get the desired
+        // number of steps. Doing this because I'm not confident whether calling
+        // advance_one_reaction in a loop will be slower than advance_until,
+        // and curerntly the rebop API doesn't have a function to advance a fixed number of steps.
+        let mut last_configuration = vec![0; self.q - 2];
+        for _ in 0..NUM_CONST_GILLESPIE_STEPS {
+            // This is pretty grossly inefficient but, for correctness,
+            // we want to make sure we don't accidentally simulate a reaction past t_max,
+            // so we make sure we can undo if needed.
+            // This loop shouldn't be a big part of runtime anyway.
+            for species in 0..self.q - 2 {
+                last_configuration[species] = gillespie.get_species(species);
+            }
+            gillespie.advance_one_reaction();
+            if gillespie.get_time() > t_max {
+                self.continuous_time = t_max;
+                gillespie.set_species(last_configuration);
+                break;
             }
         }
+
         // Unless we're already over t_max after that small number of steps,
         // run enough to simulate around sqrt(n) additional reactions.
         if self.continuous_time < t_max {
-            let cur_gillespie_time = self.gillespie.as_ref().unwrap().get_time();
+            let cur_gillespie_time = gillespie.get_time();
             let elapsed_time = cur_gillespie_time - self.continuous_time;
-            let time_per_step = elapsed_time / NUM_CONST_GILLESPIE_STEPS as f64;
+            let ave_time_per_rxn = elapsed_time / NUM_CONST_GILLESPIE_STEPS as f64;
             // For now, we're going to assume that we will need to do, say,
             // at least O(sqrt n) reactions until it's worth turning on batching again.
-            let num_steps_to_take = self.n.sqrt();
-            let time_to_run_gillespie = time_per_step * num_steps_to_take as f64;
+            let num_rxns_to_execute = self.n.sqrt();
+            let time_to_run_gillespie = ave_time_per_rxn * num_rxns_to_execute as f64;
             let time_to_run_gillespie_until = (cur_gillespie_time + time_to_run_gillespie).min(t_max);
-            self.gillespie
-                .as_mut()
-                .unwrap()
-                .advance_until(time_to_run_gillespie_until);
-            self.continuous_time = self.gillespie.as_ref().unwrap().get_time();
+            gillespie.advance_until(time_to_run_gillespie_until);
+            self.continuous_time = gillespie.get_time();
         }
 
         // Update fields that have changed.
-        let new_gillespie_population = self.total_gillespie_population();
-        let delta_n = new_gillespie_population - original_gillespie_population;
+        let new_gillespie_n = self.gillespie_total_population_count();
+        let delta_n = new_gillespie_n - original_gillespie_n;
         self.n += delta_n;
         self.n_including_extra_species += delta_n;
         // We'd like to update self.discrete_batched_steps_no_passives and
@@ -1457,10 +1454,11 @@ impl SimulatorCRNMultiBatch {
     }
 
     /// Helper to get the total current population in the Gillespie simulation.
-    fn total_gillespie_population(&self) -> u64 {
+    fn gillespie_total_population_count(&self) -> u64 {
         let mut total = 0;
+        let gillespie = self.gillespie.as_ref().unwrap();
         for i in 0..self.q - 2 {
-            total += self.gillespie.as_ref().unwrap().get_species(i) as u64;
+            total += gillespie.get_species(i) as u64;
         }
         total
     }
