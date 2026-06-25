@@ -548,7 +548,7 @@ impl SimulatorCRNMultiBatch {
                     // Put the reactions into the Gillespie object.
                     for reaction in &self.crn.reactions {
                         let mut rebop_reactant_stoichs = vec![0; self.q - 2];
-                        let mut rebop_reaction_base_net_productions = vec![0; self.q - 2];
+                        let mut rebop_reactant_stoichs_negated = vec![0; self.q - 2];
                         for reactant in &reaction.reactants {
                             assert!(*reactant != self.crn.w, "W should never be a reactant.");
                             if *reactant == self.crn.k {
@@ -556,17 +556,17 @@ impl SimulatorCRNMultiBatch {
                             }
                             let reactant_gillespie_idx = batching_idx_to_gillespie_idx[&reactant];
                             rebop_reactant_stoichs[reactant_gillespie_idx] += 1;
-                            rebop_reaction_base_net_productions[reactant_gillespie_idx] -= 1;
+                            rebop_reactant_stoichs_negated[reactant_gillespie_idx] -= 1;
                         }
                         // iterate over all reactions that have this set of reactants
                         for (products, rate_constant) in &reaction.products_and_rate_constants {
-                            let mut rebop_reaction_net_productions = rebop_reaction_base_net_productions.clone();
-                            for output_species in products {
-                                if *output_species == self.crn.k || *output_species == self.crn.w {
+                            let mut rebop_reaction_net_productions = rebop_reactant_stoichs_negated.clone();
+                            for product in products {
+                                if *product == self.crn.k || *product == self.crn.w {
                                     continue;
                                 }
-                                let output_species_gillespie_idx = batching_idx_to_gillespie_idx[&output_species];
-                                rebop_reaction_net_productions[output_species_gillespie_idx] += 1;
+                                let product_gillespie_idx = batching_idx_to_gillespie_idx[&product];
+                                rebop_reaction_net_productions[product_gillespie_idx] += 1;
                             }
                             gillespie.add_reaction(
                                 Rate::lma(*rate_constant, &rebop_reactant_stoichs),
@@ -1373,6 +1373,7 @@ impl SimulatorCRNMultiBatch {
     }
 
     /// Perform some Gillespie steps.
+    /// Note that this does not in general run until `t_max`; `t_max` is just a maximum time after which to quit.
     /// The exact number of steps performed is not deterministic;
     /// we run Gillespie for roughly sqrt(n) steps, and then re-check whether batching
     /// is likely to be faster again.
