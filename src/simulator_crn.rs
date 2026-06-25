@@ -561,28 +561,29 @@ impl SimulatorCRNMultiBatch {
                     // Put the reactions into the Gillespie object.
                     for reaction in &self.crn.reactions {
                         let mut rebop_reaction_inputs = vec![0; self.q - 2];
-                        let mut rebop_reaction_base_deltas = vec![0; self.q - 2];
+                        let mut rebop_reaction_base_net_productions = vec![0; self.q - 2];
                         for reactant in &reaction.reactants {
                             if *reactant == self.crn.k {
                                 continue;
                             }
                             rebop_reaction_inputs[batching_index_to_gillespie_index[&reactant]] +=
                                 1;
-                            rebop_reaction_base_deltas
+                            rebop_reaction_base_net_productions
                                 [batching_index_to_gillespie_index[&reactant]] -= 1;
                         }
                         for possible_output in &reaction.outputs {
-                            let mut rebop_reaction_deltas = rebop_reaction_base_deltas.clone();
+                            let mut rebop_reaction_net_productions =
+                                rebop_reaction_base_net_productions.clone();
                             for output_species in &possible_output.0 {
                                 if *output_species == self.crn.k || *output_species == self.crn.w {
                                     continue;
                                 }
-                                rebop_reaction_deltas
+                                rebop_reaction_net_productions
                                     [batching_index_to_gillespie_index[&output_species]] += 1;
                             }
                             gillespie.add_reaction(
                                 Rate::lma(possible_output.1, &rebop_reaction_inputs),
-                                &rebop_reaction_deltas,
+                                &rebop_reaction_net_productions,
                             );
                         }
                     }
