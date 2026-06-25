@@ -544,6 +544,8 @@ impl SimulatorCRNMultiBatch {
             // and certainly needs to loop over all non-passive reactions at least,
             // so we'll use the number of reactions as a conservative baseline
             // (that is to say, this will probably be too reticent to use Gillespie)
+            // TODO: change this check to be based on the actual walltime of the last calls to batch_step() and
+            // also possibly gillespie_steps()
             let non_passive_probability = self.non_passive_reaction_probability();
             let rough_expected_non_passive_reactions_next_batch =
                 non_passive_probability * (self.n_including_extra_species as f64).sqrt();
