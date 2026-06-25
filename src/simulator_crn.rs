@@ -978,7 +978,7 @@ impl NDBatchResult {
     }
     /// Reset the contents of this batch result, as though it sampled a batch of size 0.
     fn reset_contents(&mut self) {
-        self.counts = Vec::new();
+        self.counts = vec![0; self.q];
         self.curr_species = 0;
         if self.dimensions > 1 {
             for i in 0..self.q {
