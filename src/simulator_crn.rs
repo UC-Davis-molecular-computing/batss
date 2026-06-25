@@ -609,6 +609,7 @@ impl SimulatorCRNMultiBatch {
         }
         //TODO: the current method name only describes the code above, because the code below we intend to move
         // to the SimulatorCRN constructor as in issue https://github.com/UC-Davis-molecular-computing/batss/issues/11
+        // above will have to be rewritten to call get_species on the existing self.gillespie object.
 
         // The "false" here means we aren't optimizing for the CRN to be "sparse."
         // See https://github.com/Armavica/rebop/pull/35 for a discussion.
