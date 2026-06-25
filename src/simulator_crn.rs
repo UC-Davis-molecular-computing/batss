@@ -522,7 +522,7 @@ impl SimulatorCRNMultiBatch {
             }
             if self.do_gillespie {
                 if self.just_started_gillespie {
-                    self.initialize_gillespie();
+                    self.initialize_gillespie_config();
                 }
                 self.gillespie_steps(t_max);
             } else {
@@ -591,7 +591,7 @@ impl SimulatorCRNMultiBatch {
     /// Initialize the Gillespie simulator; load batch config and reactions into the Gillespie object.
     /// Doing Gillespie, we may as well operate in the original CRN,
     /// because it is faithfully simulated.
-    fn initialize_gillespie(&mut self) {
+    fn initialize_gillespie_config(&mut self) {
         let mut gillespie_config: Vec<isize> = vec![0; self.q - 2];
         let mut species_index = 0;
         // Keep track of how species correspond since we need to ignore K and W.
@@ -607,6 +607,9 @@ impl SimulatorCRNMultiBatch {
             gillespie_config[species_index] = self.urn.config[i] as isize;
             species_index += 1;
         }
+        //TODO: the current method name only describes the code above, because the code below we intend to move
+        // to the SimulatorCRN constructor as in issue https://github.com/UC-Davis-molecular-computing/batss/issues/11
+
         // The "false" here means we aren't optimizing for the CRN to be "sparse."
         // See https://github.com/Armavica/rebop/pull/35 for a discussion.
         // I think the kinds of CRNs that this system is good at simulating,
