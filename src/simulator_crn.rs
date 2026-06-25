@@ -1061,6 +1061,9 @@ fn make_batch_result(dimensions: usize, length: usize) -> NDBatchResult {
 }
 
 impl SimulatorCRNMultiBatch {
+    /// Run one batch of reactions, on average O(sqrt(n)) of them, some of which will typically be passive.
+    /// Returns after simulating one batch, and does not necessarily run until `t_max`.
+    /// Updates the urn and any relevant variables; the `SimulatorCRNMultiBatch` should be in a valid state afterward.
     fn batch_step(&mut self, t_max: f64) -> () {
         self.updated_counts.reset();
         assert_eq!(
