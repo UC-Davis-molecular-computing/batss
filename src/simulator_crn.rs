@@ -527,21 +527,7 @@ impl SimulatorCRNMultiBatch {
                 self.gillespie_steps(t_max);
             } else {
                 if self.just_finished_gillespie {
-                    // We need to load the configuration from gillespie into the urn.
-                    let mut gillespie_config: Vec<u64> = vec![0; self.q];
-                    let mut species_index = 0;
-                    for i in 0..self.q {
-                        if i == self.crn.w {
-                            continue;
-                        }
-                        if i == self.crn.k {
-                            gillespie_config[i] = self.urn.config[i];
-                        }
-                        gillespie_config[i] = self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
-                        species_index += 1;
-                    }
-                    self.urn.reset_config(&gillespie_config);
-                    self.reset_k_count();
+                    self.finalize_gillespie();
                 }
                 self.batch_step(t_max);
                 let current_k_count = self.urn.config[self.crn.k];
@@ -583,7 +569,26 @@ impl SimulatorCRNMultiBatch {
         Ok(())
     }
 
-    /// Initialize the Gillespie simulator.
+    /// Called when switching from Gillespie to batch mode; populates the batch config with Gillespie's current
+    /// configuration.
+    fn finalize_gillespie(&mut self) {
+        let mut gillespie_config: Vec<u64> = vec![0; self.q];
+        let mut species_index = 0;
+        for i in 0..self.q {
+            if i == self.crn.w {
+                continue;
+            }
+            if i == self.crn.k {
+                gillespie_config[i] = self.urn.config[i];
+            }
+            gillespie_config[i] = self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
+            species_index += 1;
+        }
+        self.urn.reset_config(&gillespie_config);
+        self.reset_k_count();
+    }
+
+    /// Initialize the Gillespie simulator; load batch config and reactions into the Gillespie object.
     /// Doing Gillespie, we may as well operate in the original CRN,
     /// because it is faithfully simulated.
     fn initialize_gillespie(&mut self) {
