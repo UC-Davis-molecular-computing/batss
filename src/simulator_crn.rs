@@ -558,6 +558,7 @@ impl SimulatorCRNMultiBatch {
                             rebop_reactant_stoichs[reactant_gillespie_idx] += 1;
                             rebop_reaction_base_net_productions[reactant_gillespie_idx] -= 1;
                         }
+                        // iterate over all reactions that have this set of reactants
                         for (products, rate_constant) in &reaction.products_and_rate_constants {
                             let mut rebop_reaction_net_productions = rebop_reaction_base_net_productions.clone();
                             for output_species in products {
