@@ -1444,18 +1444,27 @@ impl SimulatorCRNMultiBatch {
             // number of steps. Doing this because I'm not confident whether calling
             // advance_one_reaction in a loop will be slower than advance_until,
             // and curerntly the rebop API doesn't have a function to advance a fixed number of steps.
+            let mut last_configuration = vec![0; self.q - 2];
             for _ in 0..NUM_CONST_GILLESPIE_STEPS {
+                // This is pretty grossly inefficient but, for correctness,
+                // we want to make sure we don't accidentally simulate a reaction past t_max,
+                // so we make sure we can undo if needed.
+                // This loop shouldn't be a big part of runtime anyway.
+                for species in 0..self.q - 2 {
+                    last_configuration[species] = gillespie.get_species(species);
+                }
                 gillespie.advance_one_reaction();
                 if gillespie.get_time() > t_max {
                     self.continuous_time = t_max;
+                    gillespie.set_species(last_configuration);
                     break;
                 }
             }
         }
-        let cur_gillespie_time = self.gillespie.as_ref().unwrap().get_time();
         // Unless we're already over t_max after that small number of steps,
         // run enough to simulate around sqrt(n) additional reactions.
         if self.continuous_time < t_max {
+            let cur_gillespie_time = self.gillespie.as_ref().unwrap().get_time();
             let elapsed_time = cur_gillespie_time - self.continuous_time;
             let time_per_step = elapsed_time / NUM_CONST_GILLESPIE_STEPS as f64;
             // For now, we're going to assume that we will need to do, say,
@@ -1468,13 +1477,14 @@ impl SimulatorCRNMultiBatch {
                 .as_mut()
                 .unwrap()
                 .advance_until(time_to_run_gillespie_until);
+            self.continuous_time = self.gillespie.as_ref().unwrap().get_time();
         }
 
+        // Update fields that have changed.
         let new_gillespie_population = self.total_gillespie_population();
         let delta_n = new_gillespie_population - original_gillespie_population;
         self.n += delta_n;
         self.n_including_extra_species += delta_n;
-        self.continuous_time = self.gillespie.as_ref().unwrap().get_time();
         // We'd like to update self.discrete_batched_steps_no_passives and
         // self.discrete_batched_steps_total, but rebop does not keep track of how many reactions
         // it simulates, so at least for now those variables only count batched steps.
