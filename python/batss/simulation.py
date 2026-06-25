@@ -657,7 +657,9 @@ class Simulation:
                 # print(f"First thing: {self.simulator.continuous_time} and {max_wallclock_time}") # type: ignore
                 # print(f"Second thing: {next_time}")
                 # print(f"Third thing: {self.simulator.config}")
-                assert self.simulator.continuous_time == next_time, "Haven't yet implemented behavior when crn simulation runs past max_wallclock_time" # type: ignore
+                simulator_time = self.simulator.continuous_time # type: ignore
+                assert simulator_time == next_time, "Haven't yet implemented behavior when crn simulation runs past max_wallclock_time, " +\
+                f"and simulator time {simulator_time} does not match expected time {next_time}"
                 self.time = next_time
             else:
                 self.simulator.run(next_step, *max_wallclock_time)

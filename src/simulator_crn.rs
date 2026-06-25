@@ -19,11 +19,11 @@ use pyo3::types::PyNone;
 use num_integer::{binomial, Roots};
 use numpy::PyReadonlyArray1;
 use rand::rngs::SmallRng;
-use rand::Rng;
 use rand::SeedableRng;
+use rand::{Rng, RngCore};
 use rand_distr::{Distribution, Exp, Gamma, StandardUniform};
 
-use rebop::gillespie::Gillespie;
+use rebop::gillespie::{Gillespie, Rate};
 
 use itertools::Itertools;
 
@@ -61,6 +61,8 @@ pub struct UniformCRN {
     pub w: State,
     /// The CRN's reactions. If multiple reactions share the same reactants, they are stored in
     /// the same Reaction object, for ease of iterating over reactions.
+    /// Reactions include K and W, but rate constants are as in the original CRN,
+    /// not yet adjusted based on the count of K in the configuration being simulated.
     pub reactions: Vec<CombinedReactions>,
     /// The correction factor for running reactions in continuous time. The whole CRN is treated
     /// as having a total propensity equal to (n choose o) * continuous_time_correction_factor.
@@ -534,10 +536,16 @@ impl SimulatorCRNMultiBatch {
                         // because it is faithfully simulated.
                         let mut gillespie_config: Vec<isize> = vec![0; self.q - 2];
                         let mut species_index = 0;
+                        // Keep track of how species correspond since we need to ignore K and W.
+                        let mut batching_index_to_gillespie_index: HashMap<usize, usize> =
+                            HashMap::new();
+                        // Iterate through species skipping k and w so that they appear in
+                        // the same order in the rebop Gillespie object.
                         for i in 0..self.q {
                             if i == self.crn.k || i == self.crn.w {
                                 continue;
                             }
+                            batching_index_to_gillespie_index.insert(i, species_index);
                             gillespie_config[species_index] = self.urn.config[i] as isize;
                             species_index += 1;
                         }
@@ -545,7 +553,39 @@ impl SimulatorCRNMultiBatch {
                         // See https://github.com/Armavica/rebop/pull/35 for a discussion.
                         // I think the kinds of CRNs that this system is good at simulating,
                         // will typically not be sparse, but that might not be true.
-                        self.gillespie = Some(Gillespie::new(gillespie_config, false));
+                        let mut gillespie =
+                            Gillespie::new_with_seed(gillespie_config, false, self.rng.next_u64());
+                        // Put the reactions into the Gillespie object.
+                        for reaction in &self.crn.reactions {
+                            let mut rebop_reaction_inputs = vec![0; self.q - 2];
+                            let mut rebop_reaction_base_deltas = vec![0; self.q - 2];
+                            for reactant in &reaction.reactants {
+                                if *reactant == self.crn.k {
+                                    continue;
+                                }
+                                rebop_reaction_inputs
+                                    [batching_index_to_gillespie_index[&reactant]] += 1;
+                                rebop_reaction_base_deltas
+                                    [batching_index_to_gillespie_index[&reactant]] -= 1;
+                            }
+                            for possible_output in &reaction.outputs {
+                                let mut rebop_reaction_deltas = rebop_reaction_base_deltas.clone();
+                                for output_species in &possible_output.0 {
+                                    if *output_species == self.crn.k
+                                        || *output_species == self.crn.w
+                                    {
+                                        continue;
+                                    }
+                                    rebop_reaction_deltas
+                                        [batching_index_to_gillespie_index[&output_species]] += 1;
+                                }
+                                gillespie.add_reaction(
+                                    Rate::lma(possible_output.1, &rebop_reaction_inputs),
+                                    &rebop_reaction_deltas,
+                                );
+                            }
+                        }
+                        self.gillespie = Some(gillespie);
                     }
                     self.gillespie_steps(t_max);
                 } else {
