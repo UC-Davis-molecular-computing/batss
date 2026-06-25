@@ -548,14 +548,14 @@ impl SimulatorCRNMultiBatch {
                     let mut gillespie = Gillespie::new_with_seed(gillespie_config, false, self.rng.next_u64());
                     // Put the reactions into the Gillespie object.
                     for reaction in &self.crn.reactions {
-                        let mut rebop_reaction_inputs = vec![0; self.q - 2];
+                        let mut rebop_reactant_stoichs = vec![0; self.q - 2];
                         let mut rebop_reaction_base_net_productions = vec![0; self.q - 2];
                         for reactant in &reaction.reactants {
                             assert!(*reactant != self.crn.w, "W should never be a reactant.");
                             if *reactant == self.crn.k {
                                 continue;
                             }
-                            rebop_reaction_inputs[batching_index_to_gillespie_index[&reactant]] += 1;
+                            rebop_reactant_stoichs[batching_index_to_gillespie_index[&reactant]] += 1;
                             rebop_reaction_base_net_productions[batching_index_to_gillespie_index[&reactant]] -= 1;
                         }
                         for possible_output in &reaction.outputs {
@@ -567,7 +567,7 @@ impl SimulatorCRNMultiBatch {
                                 rebop_reaction_net_productions[batching_index_to_gillespie_index[&output_species]] += 1;
                             }
                             gillespie.add_reaction(
-                                Rate::lma(possible_output.1, &rebop_reaction_inputs),
+                                Rate::lma(possible_output.1, &rebop_reactant_stoichs),
                                 &rebop_reaction_net_productions,
                             );
                         }
