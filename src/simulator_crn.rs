@@ -522,59 +522,7 @@ impl SimulatorCRNMultiBatch {
             }
             if self.do_gillespie {
                 if self.just_started_gillespie {
-                    // Initialize the Gillespie simulator.
-                    // Doing Gillespie, we may as well operate in the original CRN,
-                    // because it is faithfully simulated.
-                    let mut gillespie_config: Vec<isize> = vec![0; self.q - 2];
-                    let mut species_index = 0;
-                    // Keep track of how species correspond since we need to ignore K and W.
-                    let mut batching_idx_to_gillespie_idx: HashMap<usize, usize> = HashMap::new();
-                    // Iterate through species skipping k and w so that they appear in
-                    // the same order in the rebop Gillespie object.
-                    for i in 0..self.q {
-                        if i == self.crn.k || i == self.crn.w {
-                            continue;
-                        }
-
-                        batching_idx_to_gillespie_idx.insert(i, species_index);
-                        gillespie_config[species_index] = self.urn.config[i] as isize;
-                        species_index += 1;
-                    }
-                    // The "false" here means we aren't optimizing for the CRN to be "sparse."
-                    // See https://github.com/Armavica/rebop/pull/35 for a discussion.
-                    // I think the kinds of CRNs that this system is good at simulating,
-                    // will typically not be sparse, but that might not be true.
-                    let mut gillespie = Gillespie::new_with_seed(gillespie_config, false, self.rng.next_u64());
-                    // Put the reactions into the Gillespie object.
-                    for reaction in &self.crn.reactions {
-                        let mut rebop_reactant_stoichs = vec![0; self.q - 2];
-                        let mut rebop_reactant_stoichs_negated = vec![0; self.q - 2];
-                        for reactant in &reaction.reactants {
-                            assert!(*reactant != self.crn.w, "W should never be a reactant.");
-                            if *reactant == self.crn.k {
-                                continue;
-                            }
-                            let reactant_gillespie_idx = batching_idx_to_gillespie_idx[&reactant];
-                            rebop_reactant_stoichs[reactant_gillespie_idx] += 1;
-                            rebop_reactant_stoichs_negated[reactant_gillespie_idx] -= 1;
-                        }
-                        // iterate over all reactions that have this set of reactants
-                        for (products, rate_constant) in &reaction.products_and_rate_constants {
-                            let mut rebop_reaction_net_productions = rebop_reactant_stoichs_negated.clone();
-                            for product in products {
-                                if *product == self.crn.k || *product == self.crn.w {
-                                    continue;
-                                }
-                                let product_gillespie_idx = batching_idx_to_gillespie_idx[&product];
-                                rebop_reaction_net_productions[product_gillespie_idx] += 1;
-                            }
-                            gillespie.add_reaction(
-                                Rate::lma(*rate_constant, &rebop_reactant_stoichs),
-                                &rebop_reaction_net_productions,
-                            );
-                        }
-                    }
-                    self.gillespie = Some(gillespie);
+                    self.initialize_gillespie();
                 }
                 self.gillespie_steps(t_max);
             } else {
@@ -633,6 +581,62 @@ impl SimulatorCRNMultiBatch {
             }
         }
         Ok(())
+    }
+
+    /// Initialize the Gillespie simulator.
+    /// Doing Gillespie, we may as well operate in the original CRN,
+    /// because it is faithfully simulated.
+    fn initialize_gillespie(&mut self) {
+        let mut gillespie_config: Vec<isize> = vec![0; self.q - 2];
+        let mut species_index = 0;
+        // Keep track of how species correspond since we need to ignore K and W.
+        let mut batching_idx_to_gillespie_idx: HashMap<usize, usize> = HashMap::new();
+        // Iterate through species skipping k and w so that they appear in
+        // the same order in the rebop Gillespie object.
+        for i in 0..self.q {
+            if i == self.crn.k || i == self.crn.w {
+                continue;
+            }
+
+            batching_idx_to_gillespie_idx.insert(i, species_index);
+            gillespie_config[species_index] = self.urn.config[i] as isize;
+            species_index += 1;
+        }
+        // The "false" here means we aren't optimizing for the CRN to be "sparse."
+        // See https://github.com/Armavica/rebop/pull/35 for a discussion.
+        // I think the kinds of CRNs that this system is good at simulating,
+        // will typically not be sparse, but that might not be true.
+        let mut gillespie = Gillespie::new_with_seed(gillespie_config, false, self.rng.next_u64());
+        // Put the reactions into the Gillespie object.
+        for reaction in &self.crn.reactions {
+            let mut rebop_reactant_stoichs = vec![0; self.q - 2];
+            let mut rebop_reactant_stoichs_negated = vec![0; self.q - 2];
+            for reactant in &reaction.reactants {
+                assert!(*reactant != self.crn.w, "W should never be a reactant.");
+                if *reactant == self.crn.k {
+                    continue;
+                }
+                let reactant_gillespie_idx = batching_idx_to_gillespie_idx[&reactant];
+                rebop_reactant_stoichs[reactant_gillespie_idx] += 1;
+                rebop_reactant_stoichs_negated[reactant_gillespie_idx] -= 1;
+            }
+            // iterate over all reactions that have this set of reactants
+            for (products, rate_constant) in &reaction.products_and_rate_constants {
+                let mut rebop_reaction_net_productions = rebop_reactant_stoichs_negated.clone();
+                for product in products {
+                    if *product == self.crn.k || *product == self.crn.w {
+                        continue;
+                    }
+                    let product_gillespie_idx = batching_idx_to_gillespie_idx[&product];
+                    rebop_reaction_net_productions[product_gillespie_idx] += 1;
+                }
+                gillespie.add_reaction(
+                    Rate::lma(*rate_constant, &rebop_reactant_stoichs),
+                    &rebop_reaction_net_productions,
+                );
+            }
+        }
+        self.gillespie = Some(gillespie);
     }
 
     /// Run the simulation until it is silent, i.e., no reactions are applicable.
