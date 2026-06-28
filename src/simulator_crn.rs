@@ -1129,20 +1129,6 @@ impl SimulatorCRNMultiBatch {
             flame::start("checkpoint rejection sampling");
             rxns_before_coll = self.checkpoint_rejection_sampling(l, t_max);
 
-            // let mut time_exceeded = false;
-            // while !time_exceeded {
-            //     let mut partial_batch_time = 0.0;
-            //     for i in 0..l {
-            //         let rate =
-            //             self.get_exponential_rate(self.n_including_extra_species + i * self.crn.g);
-            //         partial_batch_time += self.sample_exponential(rate);
-            //         if partial_batch_time + self.continuous_time > t_max {
-            //             time_exceeded = true;
-            //             rxns_before_coll = i;
-            //             break;
-            //         }
-            //     }
-            // }
             self.continuous_time = t_max;
             flame::end("checkpoint rejection sampling");
         }
@@ -1463,6 +1449,53 @@ impl SimulatorCRNMultiBatch {
             total += gillespie.get_species(i) as u64;
         }
         total
+    }
+
+    /// Helper to calculate the total propensity of the CRN given the current configuration in `self.urn`.
+    /// If use_original_crn is true, uses original rate constants and stoichiometries ignoring K.
+    /// If include_passive_reactions is true, calculates the total propensity including these.
+    fn calculate_total_propensity(&self, use_original_crn: bool, include_passive_reactions: bool) -> f64 {
+        assert!(
+            !(use_original_crn && include_passive_reactions),
+            "Cannot calculate propensity of original CRN including passive reactions."
+        );
+        if include_passive_reactions {
+            // The propensity of the CRN as a whole is treated as having this value.
+            // This matches the value in `get_exponential_rate` on the whole population size.
+            return self.crn.continuous_time_correction_factor
+                * binomial_as_f64(self.n_including_extra_species, self.crn.o as u64);
+        }
+        for reaction in &self.crn.reactions {
+            let mut transition_array_view = self.random_transitions.view();
+            let reactants = &reaction.reactants;
+            let mut num_times_reactant_seen: HashMap<State, u64> = HashMap::new();
+            let mut propensity_factor_from_stoichiometry = 1.0;
+            for reactant in reactants {
+                // This first line will, over the course of the loop, index through random_transitions to find
+                // the info on the relevant reaction.
+                transition_array_view = transition_array_view.index_axis_move(Axis(0), *reactant);
+                assert!(*reactant != self.crn.w, "W should never be a reactant");
+                if use_original_crn && *reactant == self.crn.k {
+                    continue;
+                }
+                *num_times_reactant_seen.entry(*reactant).or_default() += 1;
+                let num_copies_of_next_reactant = self.urn.config[*reactant] - num_times_reactant_seen[&reactant] + 1;
+                propensity_factor_from_stoichiometry *= num_copies_of_next_reactant as f64;
+                propensity_factor_from_stoichiometry /= num_times_reactant_seen[&reactant] as f64;
+            }
+            assert_eq!(
+                transition_array_view.shape(),
+                &[2],
+                "Unexpected shape in random_transitions: {:?}",
+                transition_array_view.shape()
+            );
+
+            let mut total_rate_constant = 0.0;
+            for (_, rate_constant) in &reaction.products_and_rate_constants {
+                total_rate_constant += rate_constant;
+            }
+        }
+        3.
     }
 
     /// Update the count of K in preparation for the next batch.
