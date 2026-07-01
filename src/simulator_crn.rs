@@ -810,68 +810,14 @@ impl SimulatorCRNMultiBatch {
         return answer;
     }
     /// Calculate the probability that a reaction in the next batch will be non-passive.
-    /// Done by manually adding up all of the possible vectors that might be sampled,
-    /// essentially executing the same loop as in batch_step.
-    /// There is some code duplication from this, which is tough to avoid.
-    /// Mutable because it resets self.array_sums in order to easily iterate through reactions.
-    pub fn non_passive_reaction_probability(&mut self) -> f64 {
-        // As a hack to avoid making a new NDBatchResult, we just sample 0 reactions into this one.
-        // This function should not be called in the middle of batch sampling,
-        // so this step should be safe to do.
-        self.array_sums.reset_contents();
-        // These aren't probabilities, they're parts of some total space that will be normalized later.
-        let mut total_passive_probability_mass = 0.0;
-        let mut total_non_passive_probability_mass = 0.0;
-        let mut done = false;
-        let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
-        // TODO: we might be able to reintroduce the optimzation around keeping the urn sorted
-        // and taking advantage of sample_vector returning the highest state returned. Probably
-        // in the current implementation, this would live in NDBatchResult and its iteration,
-        // and we'd iterate over it instead of self.random_transitions.
-        for random_transition in reactions_iter {
-            assert!(
-                !done,
-                "self.array_sums finished iterating before self.random_transitions"
-            );
-            let next_array_sum = self.array_sums.get_next();
-            let reactants = next_array_sum.0;
-            // We weight by the probability that this reaction will actually happen next,
-            // with these reactants in this order,
-            // non-passively. This is similar to calculating its propensity, as it's
-            // the number of ways to choose these reactants (in this order)
-            // divided by the total number of ways to choose reactants.
-            // Since this division is by a constant, we omit it.
-            let mut num_times_seen: HashMap<State, u64> = HashMap::new();
-            let mut num_ways_to_choose_these_reactants_in_order = 1.0;
-            for reactant in reactants {
-                *num_times_seen.entry(reactant).or_default() += 1;
-                let num_copies_of_next_reactant = self.urn.config[reactant] - num_times_seen[&reactant] - 1;
-                num_ways_to_choose_these_reactants_in_order *= num_copies_of_next_reactant as f64;
-                num_ways_to_choose_these_reactants_in_order /= num_times_seen[&reactant] as f64;
-            }
-            done = next_array_sum.2;
-            let (num_outputs, first_idx) = (random_transition[0], random_transition[1]);
-            // TODO and WARNING: this code is more or less copy-paste with the collision sampling code.
-            // They do the same thing. But it's apparently very annoying to refactor this into a
-            // helper method in rust because of the immutable borrow of self above.
-            if num_outputs == 0 {
-                // Passive reaction.
-                total_passive_probability_mass += num_ways_to_choose_these_reactants_in_order;
-            } else {
-                let probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
-                let non_passive_probability_sum: f64 = probabilities.iter().sum();
-                total_passive_probability_mass +=
-                    non_passive_probability_sum * num_ways_to_choose_these_reactants_in_order;
-                total_non_passive_probability_mass +=
-                    (1.0 - non_passive_probability_sum) * num_ways_to_choose_these_reactants_in_order;
-            }
-        }
+    pub fn non_passive_reaction_probability(&self) -> f64 {
+        let total_propensity_not_including_passive_reactions = self.calculate_total_propensity(false, false);
+        let total_propensity_including_passive_reactions = self.calculate_total_propensity(false, true);
         assert!(
-            done,
-            "self.random_transitions finished iterating before self.array_sums"
+            total_propensity_not_including_passive_reactions <= total_propensity_including_passive_reactions,
+            "Total propensity should not be lower when including passive reactions"
         );
-        let total_probability_mass = total_passive_probability_mass + total_non_passive_probability_mass;
-        total_non_passive_probability_mass / total_probability_mass
+        return total_propensity_not_including_passive_reactions / total_propensity_including_passive_reactions;
     }
 }
 
@@ -1389,47 +1335,24 @@ impl SimulatorCRNMultiBatch {
             self.n,
             original_gillespie_n
         );
-        const NUM_CONST_GILLESPIE_STEPS: usize = 30;
+        assert!(
+            self.continuous_time < t_max,
+            "gillespie_steps should not be called when already past t_max"
+        );
 
+        let total_propensity = self.calculate_total_propensity(true, false);
         // Borrow mutably for as long as we need it, for convenience.
         let gillespie = self.gillespie.as_mut().unwrap();
         gillespie.set_time(self.continuous_time);
-        // We'll just run a small constant number of steps, see how much (CRN) time that took,
-        // and use that as an estimate for how long we need to run to get the desired
-        // number of steps. Doing this because I'm not confident whether calling
-        // advance_one_reaction in a loop will be slower than advance_until,
-        // and curerntly the rebop API doesn't have a function to advance a fixed number of steps.
-        let mut last_configuration = vec![0; self.q - 2];
-        for _ in 0..NUM_CONST_GILLESPIE_STEPS {
-            // This is pretty grossly inefficient but, for correctness,
-            // we want to make sure we don't accidentally simulate a reaction past t_max,
-            // so we make sure we can undo if needed.
-            // This loop shouldn't be a big part of runtime anyway.
-            for species in 0..self.q - 2 {
-                last_configuration[species] = gillespie.get_species(species);
-            }
-            gillespie.advance_one_reaction();
-            if gillespie.get_time() > t_max {
-                self.continuous_time = t_max;
-                gillespie.set_species(last_configuration);
-                break;
-            }
-        }
 
-        // Unless we're already over t_max after that small number of steps,
-        // run enough to simulate around sqrt(n) additional reactions.
-        if self.continuous_time < t_max {
-            let cur_gillespie_time = gillespie.get_time();
-            let elapsed_time = cur_gillespie_time - self.continuous_time;
-            let ave_time_per_rxn = elapsed_time / NUM_CONST_GILLESPIE_STEPS as f64;
-            // For now, we're going to assume that we will need to do, say,
-            // at least O(sqrt n) reactions until it's worth turning on batching again.
-            let num_rxns_to_execute = self.n.sqrt();
-            let time_to_run_gillespie = ave_time_per_rxn * num_rxns_to_execute as f64;
-            let time_to_run_gillespie_until = (cur_gillespie_time + time_to_run_gillespie).min(t_max);
-            gillespie.advance_until(time_to_run_gillespie_until);
-            self.continuous_time = gillespie.get_time();
-        }
+        let ave_time_per_rxn = 1.0 / total_propensity;
+        // For now, we're going to assume that we will need to do, say,
+        // at least O(sqrt n) reactions until it's worth turning on batching again.
+        let num_rxns_to_execute = self.n.sqrt();
+        let time_to_run_gillespie = ave_time_per_rxn * num_rxns_to_execute as f64;
+        let time_to_run_gillespie_until = (self.continuous_time + time_to_run_gillespie).min(t_max);
+        gillespie.advance_until(time_to_run_gillespie_until);
+        self.continuous_time = gillespie.get_time();
 
         // Update fields that have changed.
         let new_gillespie_n = self.gillespie_total_population_count();
@@ -1465,6 +1388,7 @@ impl SimulatorCRNMultiBatch {
             return self.crn.continuous_time_correction_factor
                 * binomial_as_f64(self.n_including_extra_species, self.crn.o as u64);
         }
+        let mut total_propensity = 0.0;
         for reaction in &self.crn.reactions {
             let mut transition_array_view = self.random_transitions.view();
             let reactants = &reaction.reactants;
@@ -1494,8 +1418,15 @@ impl SimulatorCRNMultiBatch {
             for (_, rate_constant) in &reaction.products_and_rate_constants {
                 total_rate_constant += rate_constant;
             }
+            if use_original_crn {
+                total_propensity += total_rate_constant * propensity_factor_from_stoichiometry;
+            } else {
+                total_propensity += total_rate_constant
+                    * propensity_factor_from_stoichiometry
+                    * self.crn.continuous_time_correction_factor;
+            }
         }
-        3.
+        total_propensity
     }
 
     /// Update the count of K in preparation for the next batch.
