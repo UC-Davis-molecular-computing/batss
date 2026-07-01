@@ -958,17 +958,6 @@ impl NDBatchResult {
             }
         }
     }
-    /// Reset the contents of this batch result, as though it sampled a batch of size 0.
-    fn reset_contents(&mut self) {
-        self.counts = vec![0; self.q];
-        self.curr_species = 0;
-        if self.dimensions > 1 {
-            for i in 0..self.q {
-                let subresults = self.subresults.as_mut().unwrap();
-                subresults[i].reset_contents();
-            }
-        }
-    }
     /// Method used for recursively iterating through NDBatchResult.
     /// Returns triple (reactants, count, done).
     /// reactants: which reactant vector this entry represents
