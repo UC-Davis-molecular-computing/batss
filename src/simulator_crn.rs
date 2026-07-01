@@ -582,6 +582,7 @@ impl SimulatorCRNMultiBatch {
             }
             if i == self.crn.k {
                 gillespie_config[i] = self.urn.config[i];
+                continue;
             }
             gillespie_config[i] = self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
             species_index += 1;
@@ -811,11 +812,13 @@ impl SimulatorCRNMultiBatch {
     }
     /// Calculate the probability that a reaction in the next batch will be non-passive.
     pub fn non_passive_reaction_probability(&self) -> f64 {
-        let total_propensity_not_including_passive_reactions = self.calculate_total_propensity(false, false);
-        let total_propensity_including_passive_reactions = self.calculate_total_propensity(false, true);
+        let total_propensity_not_including_passive_reactions = self.calculate_total_propensity(false);
+        let total_propensity_including_passive_reactions = self.calculate_total_propensity(true);
         assert!(
             total_propensity_not_including_passive_reactions <= total_propensity_including_passive_reactions,
-            "Total propensity should not be lower when including passive reactions"
+            "Total propensity should not be lower when including passive reactions: {:?} with vs {:?} without",
+            total_propensity_including_passive_reactions,
+            total_propensity_not_including_passive_reactions
         );
         return total_propensity_not_including_passive_reactions / total_propensity_including_passive_reactions;
     }
@@ -1329,7 +1332,7 @@ impl SimulatorCRNMultiBatch {
             "gillespie_steps should not be called when already past t_max"
         );
 
-        let total_propensity = self.calculate_total_propensity(true, false);
+        let total_propensity = self.calculate_total_propensity(false);
         // Borrow mutably for as long as we need it, for convenience.
         let gillespie = self.gillespie.as_mut().unwrap();
         gillespie.set_time(self.continuous_time);
@@ -1364,13 +1367,13 @@ impl SimulatorCRNMultiBatch {
     }
 
     /// Helper to calculate the total propensity of the CRN given the current configuration in `self.urn`.
-    /// If use_original_crn is true, uses original rate constants and stoichiometries ignoring K.
-    /// If include_passive_reactions is true, calculates the total propensity including these.
-    fn calculate_total_propensity(&self, use_original_crn: bool, include_passive_reactions: bool) -> f64 {
-        assert!(
-            !(use_original_crn && include_passive_reactions),
-            "Cannot calculate propensity of original CRN including passive reactions."
-        );
+    /// Note that this value will be the same whether we want the total propensity of the original CRN in the
+    /// current configuration, or the total propensity of non-passive reactions in the modified CRN;
+    /// this must be true because the algorithm is exact, so the expected time until any non-passive reaction must
+    /// be the same as the expected time until any reaction in the original CRN.
+    /// We do this calculation in the original CRN, as it is more direct.
+    /// If include_passive_reactions is true, calculates the total propensity in the new CRN including these.
+    fn calculate_total_propensity(&self, include_passive_reactions: bool) -> f64 {
         if include_passive_reactions {
             // The propensity of the CRN as a whole is treated as having this value.
             // This matches the value in `get_exponential_rate` on the whole population size.
@@ -1379,16 +1382,13 @@ impl SimulatorCRNMultiBatch {
         }
         let mut total_propensity = 0.0;
         for reaction in &self.crn.reactions {
-            let mut transition_array_view = self.random_transitions.view();
             let reactants = &reaction.reactants;
             let mut num_times_reactant_seen: HashMap<State, u64> = HashMap::new();
             let mut propensity_factor_from_stoichiometry = 1.0;
             for reactant in reactants {
-                // This first line will, over the course of the loop, index through random_transitions to find
-                // the info on the relevant reaction.
-                transition_array_view = transition_array_view.index_axis_move(Axis(0), *reactant);
                 assert!(*reactant != self.crn.w, "W should never be a reactant");
-                if use_original_crn && *reactant == self.crn.k {
+                // We're skipping over k, because we want to work in the original, unmodified CRN.
+                if *reactant == self.crn.k {
                     continue;
                 }
                 *num_times_reactant_seen.entry(*reactant).or_default() += 1;
@@ -1396,24 +1396,12 @@ impl SimulatorCRNMultiBatch {
                 propensity_factor_from_stoichiometry *= num_copies_of_next_reactant as f64;
                 propensity_factor_from_stoichiometry /= num_times_reactant_seen[&reactant] as f64;
             }
-            assert_eq!(
-                transition_array_view.shape(),
-                &[2],
-                "Unexpected shape in random_transitions: {:?}",
-                transition_array_view.shape()
-            );
 
             let mut total_rate_constant = 0.0;
             for (_, rate_constant) in &reaction.products_and_rate_constants {
                 total_rate_constant += rate_constant;
             }
-            if use_original_crn {
-                total_propensity += total_rate_constant * propensity_factor_from_stoichiometry;
-            } else {
-                total_propensity += total_rate_constant
-                    * propensity_factor_from_stoichiometry
-                    * self.crn.continuous_time_correction_factor;
-            }
+            total_propensity += total_rate_constant * propensity_factor_from_stoichiometry;
         }
         total_propensity
     }
