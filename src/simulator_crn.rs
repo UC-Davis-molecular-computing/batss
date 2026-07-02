@@ -1554,7 +1554,19 @@ impl SimulatorCRNMultiBatch {
         // the loop iterations we'd manage to skip are going to be ones where we don't need
         // high precision arithmetic, so they're not the bottleneck at high pop size anyway.
         while t_lo < t_hi - 1 {
-            let t_mid = (t_lo + t_hi) / 2;
+            // We know this thing is typically Theta(sqrt n), so it's wasteful to binary search with an upper limit
+            // that is on the order of n.
+            // To that end, we start by linearly searching forward in increments of sqrt(n).
+            // This should quickly establish a better upper bound.
+            let mut t_mid: u64;
+            if t_hi > self.n_including_extra_species / (5 * self.crn.o as u64) {
+                t_mid = t_lo + self.n_including_extra_species.sqrt();
+                if t_mid >= t_hi {
+                    t_mid = (t_lo + t_hi) / 2;
+                }
+            } else {
+                t_mid = (t_lo + t_hi) / 2;
+            }
             // rhs tracks all of the terms that include t, i.e., those that we need to
             // update each iteration of binary search.
             let mut rhs;
