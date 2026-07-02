@@ -74,6 +74,13 @@
             "request": "launch",
             "program": "examples/generate_sequential_samples.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debug examples/plot_timing_data.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "examples/plot_timing_data.py",
+            "console": "integratedTerminal"
         }
     ]
 }
