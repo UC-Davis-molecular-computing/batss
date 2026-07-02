@@ -60,6 +60,9 @@ class CRNSpec:
     inits_from_n: Callable[[int], dict[Specie, int]]
     """Given ``n``, return initial counts keyed by the Species used in rxns."""
 
+    benchmark_end_time: float
+    """Simulated end time used by :func:`benchmark_runtimes` and :func:`plot_runtimes`."""
+
 
 def _spec_species_names(spec: CRNSpec) -> list[str]:
     """Species that appear in spec.rxns, in first-seen order."""
@@ -106,8 +109,8 @@ def _rebop_crn(spec: CRNSpec, n: int) -> tuple[rb.Gillespie, dict[str, int]]:
 # --- plot 1: runtime vs population size ---------------------------------------
 
 
-def _runtime_path(cache_dir: Path, spec: CRNSpec, backend: str, end_time: float) -> Path:
-    return cache_dir / f"{spec.name}_runtime_{backend}_t{end_time}.json"
+def _runtime_path(data_dir: Path, spec: CRNSpec, backend: str, end_time: float) -> Path:
+    return data_dir / f"{spec.name}_runtime_{backend}_t{end_time}.json"
 
 
 def _load_runtime_json(path: Path) -> dict[int, float]:
@@ -126,22 +129,22 @@ def _save_runtime_json(path: Path, data: dict[int, float]) -> None:
 def benchmark_runtimes(
     spec: CRNSpec,
     pop_sizes: Iterable[int],
-    end_time: float,
-    cache_dir: str | Path = "data",
+    data_dir: str | Path = "data",
     backends: tuple[str, ...] = ("batss", "rebop"),
     seed: int = 1,
     overwrite: bool = False,
 ) -> None:
-    """Time one run to ``end_time`` for each (backend, n) and cache to JSON.
+    """Time one run to ``spec.benchmark_end_time`` for each (backend, n) and cache to JSON.
 
     Already-cached (backend, n) pairs are skipped unless ``overwrite=True``.
     The first timed run for each backend is preceded by a warm-up run whose time
     is discarded (rebop's first call in a process is notably slower than
     subsequent ones).
     """
-    cache_dir = Path(cache_dir)
+    end_time = spec.benchmark_end_time
+    data_dir = Path(data_dir)
     for backend in backends:
-        path = _runtime_path(cache_dir, spec, backend, end_time)
+        path = _runtime_path(data_dir, spec, backend, end_time)
         data = {} if overwrite else _load_runtime_json(path)
         print(f"benchmarking {spec.name} on {backend} -> {path}")
 
@@ -178,12 +181,10 @@ def benchmark_runtimes(
 
 def plot_runtimes(
     spec: CRNSpec,
-    end_time: float,
-    cache_dir: str | Path = "data",
+    data_dir: str | Path = "data",
     backends: tuple[str, ...] = ("batss", "rebop"),
     pop_sizes: Iterable[int] | None = None,
     figsize: tuple[float, float] = (5, 4),
-    out_path: str | Path | None = None,
     ax: Axes | None = None,
 ) -> Axes:
     """Load cached runtimes and overlay them on log-log axes.
@@ -191,15 +192,18 @@ def plot_runtimes(
     If ``pop_sizes`` is given, only those ``n`` values are plotted (useful when
     the JSON cache contains data from earlier runs at larger ``n`` that you
     don't want on this plot). If ``None``, every cached point is plotted.
+
+    The figure is saved to ``<data_dir>/<spec.name>_runtime_t<end_time>.pdf``.
     """
-    cache_dir = Path(cache_dir)
+    end_time = spec.benchmark_end_time
+    data_dir = Path(data_dir)
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
 
     wanted = set(pop_sizes) if pop_sizes is not None else None
     markers = {"batss": "o", "rebop": "^"}
     for backend in backends:
-        path = _runtime_path(cache_dir, spec, backend, end_time)
+        path = _runtime_path(data_dir, spec, backend, end_time)
         data = _load_runtime_json(path)
         if not data:
             print(f"no runtime data for {backend} at {path}")
@@ -213,9 +217,9 @@ def plot_runtimes(
     ax.set_title(f"{spec.name}: run time to simulate t={end_time}")
     ax.legend(loc="upper left")
 
-    if out_path is not None:
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(out_path, bbox_inches="tight")
+    out_path = data_dir / f"{spec.name}_runtime_t{end_time}.pdf"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_path, bbox_inches="tight")
     return ax
 
 
@@ -226,7 +230,7 @@ def _passive_fractions(sim: Simulation) -> tuple[list[float], list[float]]:
     # Intervals with zero total steps (always the first and last, sometimes
     # others at small n) would divide by zero — drop them.
     total = np.array(sim.discrete_batched_steps_total_last_run)
-    non_null = np.array(sim.discrete_batched_steps_no_nulls_last_run)
+    non_null = np.array(sim.discrete_batched_steps_no_passives_last_run)
     all_times = sim.history.index.tolist()
     times = [t for t, n in zip(all_times, total) if n > 0]
     fractions = [(n - m) / n for n, m in zip(total, non_null) if n > 0]
@@ -237,12 +241,12 @@ def plot_trajectory(
     spec: CRNSpec,
     n: int,
     end_time: float,
+    data_dir: str | Path = "data",
     seed: int = 1,
     num_samples: int = 1000,
     species: list[str] | None = None,
     with_passive: bool = True,
     figsize: tuple[float, float] = (8, 4),
-    out_path: str | Path | None = None,
     ax: Axes | None = None,
 ) -> Axes:
     """Simulate ``spec`` with batss at population size ``n`` and plot counts vs time.
@@ -254,6 +258,8 @@ def plot_trajectory(
 
     ``species`` is a list of species-name strings to plot; defaults to the
     species named in ``spec.rxns``.
+
+    The figure is saved to ``<data_dir>/<spec.name>_trajectory_n<n>_t<end_time>.pdf``.
     """
     # write n as $10^e$ if n is a power of 10, otherwise with commas
     exp = int(round(np.log10(n))) if n > 0 else -1
@@ -293,7 +299,7 @@ def plot_trajectory(
     ax.legend(handles, labels, loc="lower right")
     ax.set_title(f"{spec.name}: n={n_str}")
 
-    if out_path is not None:
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(out_path, bbox_inches="tight")
+    out_path = Path(data_dir) / f"{spec.name}_trajectory_n{n}_t{end_time}.pdf"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_path, bbox_inches="tight")
     return ax

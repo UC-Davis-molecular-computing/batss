@@ -10,7 +10,7 @@ from __future__ import annotations
 import batss as bt
 from batss.benchmarking import CRNSpec, benchmark_runtimes, plot_runtimes, plot_trajectory
 
-CACHE_DIR = "data"
+DATA_DIR = "data"
 
 
 def dimerization_spec() -> CRNSpec:
@@ -23,6 +23,7 @@ def dimerization_spec() -> CRNSpec:
         name="dimerization",
         rxns=rxns,
         inits_from_n=lambda n: {m: n},
+        benchmark_end_time=0.5,
     )
 
 
@@ -30,18 +31,14 @@ def main() -> None:
     spec = dimerization_spec()
 
     # 1) runtime scaling: batss vs rebop
-    end_time = 0.5
     benchmark_runtimes(
         spec,
         pop_sizes=[10**e for e in range(3, 11)],
-        end_time=end_time,
-        cache_dir=CACHE_DIR,
+        data_dir=DATA_DIR,
     )
     plot_runtimes(
         spec,
-        end_time=end_time,
-        cache_dir=CACHE_DIR,
-        out_path=f"{CACHE_DIR}/dimerization_runtime_t{end_time}.pdf",
+        data_dir=DATA_DIR,
     )
 
     # 2) trajectory + passive fraction
@@ -49,9 +46,9 @@ def main() -> None:
         spec,
         n=10**2,
         end_time=2.0,
+        data_dir=DATA_DIR,
         seed=1,
         num_samples=200,
-        out_path=f"{CACHE_DIR}/dimerization_trajectory_n1e2.pdf",
     )
 
 
