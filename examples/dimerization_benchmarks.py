@@ -8,7 +8,7 @@ the reusable :class:`~batss.testing.CRNSpec` interface.
 from __future__ import annotations
 
 import batss as bt
-from batss.testing import CRNSpec, benchmark_runtimes, plot_runtimes, plot_trajectory
+from batss.benchmarking import CRNSpec, benchmark_runtimes, plot_runtimes, plot_trajectory
 
 CACHE_DIR = "data"
 
