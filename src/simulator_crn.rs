@@ -1554,8 +1554,8 @@ impl SimulatorCRNMultiBatch {
         // the loop iterations we'd manage to skip are going to be ones where we don't need
         // high precision arithmetic, so they're not the bottleneck at high pop size anyway.
         while t_lo < t_hi - 1 {
-            // We know this thing is typically Theta(sqrt n), so it's wasteful to binary search with an upper limit
-            // that is on the order of n.
+            // We know the correct value of t to search for is typically Theta(sqrt n),
+            // so it's wasteful to binary search with an upper limit that is on the order of n.
             // To that end, we start by linearly searching forward in increments of sqrt(n).
             // This should quickly establish a better upper bound.
             let mut t_mid: u64;
