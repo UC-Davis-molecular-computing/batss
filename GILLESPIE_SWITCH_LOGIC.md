@@ -8,7 +8,7 @@ the switching state lives in the `SwitchState` struct.
 
 ## Background: two engines, one loop
 
-`SimulatorCRNMultiBatch::run` alternates between:
+`BatchSimulator::run` alternates between:
 
 - **batch mode** (`batch_step`): the Berenbrink-style batching algorithm (see arXiv:2508.04079).
   One "batch" advances ~√n reactions at once via collision sampling. Each batch pays a fixed cost

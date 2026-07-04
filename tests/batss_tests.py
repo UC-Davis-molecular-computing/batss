@@ -152,7 +152,7 @@ class TestCRN(unittest.TestCase):
 
 
 class TestCRNSimulation(unittest.TestCase):
-    # end-to-end tests of the crn simulator (batss_rust.SimulatorCRNMultiBatch)
+    # end-to-end tests of the crn simulator (batss_rust.BatchSimulator)
 
     def test_fratricide_converges(self) -> None:
         """The reaction 2 L -> L + F is the CRN form of the fratricide population

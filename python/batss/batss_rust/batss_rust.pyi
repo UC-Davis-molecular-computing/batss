@@ -81,7 +81,7 @@ class Simulator(ABC):
         """TODO"""
         ...
 
-class SimulatorCRNMultiBatch(Simulator):
+class BatchSimulator(Simulator):
     """
     Simulator for CRNs using TODO cite paper once citeable.
     """

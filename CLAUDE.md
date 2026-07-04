@@ -20,7 +20,7 @@ kinetics models used purely as simulation benchmarks.
 
 - **Rust core** in [`src/`](src/): the simulator (`simulator_crn.rs`), the sampling urn
   (`urn.rs`), numerics (`util.rs`), exposed to Python via **pyo3 / maturin** as the `batss_rust`
-  extension. `SimulatorCRNMultiBatch` alternates between the batching engine and rebop's Gillespie;
+  extension. `BatchSimulator` alternates between the batching engine and rebop's Gillespie;
   the batch↔Gillespie switching logic is in `SwitchState` / `run()` (see
   [`GILLESPIE_SWITCH_LOGIC.md`](GILLESPIE_SWITCH_LOGIC.md)).
 - **Python API** in [`python/batss/`](python/batss/): `batss.Simulation`, `batss.species("A B")`,

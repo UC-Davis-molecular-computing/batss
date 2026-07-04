@@ -40,7 +40,7 @@ from tqdm.auto import tqdm
 
 from batss.crn import Reaction, reactions_to_dict, CRN, convert_to_uniform, catalyst_specie, waste_specie, extra_species
 from batss.snapshot import Snapshot, TimeUpdate
-from batss.batss_rust import Simulator, SimulatorCRNMultiBatch
+from batss.batss_rust import Simulator, BatchSimulator
 
 # TODO: these names are not showing up in the mouseover information
 State: TypeAlias = Hashable
@@ -193,7 +193,7 @@ class Simulation:
     The optional integer seed used for rng and inside Rust code.
     """
 
-    _method: type[SimulatorCRNMultiBatch]
+    _method: type[BatchSimulator]
 
     simulator_method: str
 
@@ -245,7 +245,7 @@ class Simulation:
                     agents, and simulates each interaction step by choosing a pair of agents
                     to update. Defaults to 'MultiBatch'.
                 - ``'CRN'``:
-                    :class:`batss_rust.SimulatorCRNMultiBatch` does parallel batching for arbitrary
+                    :class:`batss_rust.BatchSimulator` does parallel batching for arbitrary
                     CRNs, and should be faster than Gillespie on large population sizes and
                     small species sets.
 
@@ -380,7 +380,7 @@ class Simulation:
             self.state_dict = {state: i for i, state in enumerate(self.state_list)}
 
         if simulator_method.lower() == "crn":
-            self._method = SimulatorCRNMultiBatch
+            self._method = BatchSimulator
         else:
             raise ValueError("simulator_method must be crn.")
         self._transition_order = transition_order

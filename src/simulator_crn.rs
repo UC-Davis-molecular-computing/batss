@@ -131,7 +131,7 @@ impl UniformCRN {
         };
     }
     /// Build or rebuild random_transitions, random_outputs, and transition_probabilities
-    /// for a @SimulatorCRNMultiBatch.
+    /// for a @BatchSimulator.
     /// We need to rebuild these tables because reaction propensities depend on the count of K,
     /// which we may want to change throughout the execution.
     /// Returns a tuple of these three objects in that order.
@@ -249,7 +249,7 @@ impl UniformCRN {
 }
 
 /// Which heuristic decides, before each iteration, whether the next reactions run faster in the
-/// batching engine or in Gillespie mode. Settable from Python via `SimulatorCRNMultiBatch.heuristic`.
+/// batching engine or in Gillespie mode. Settable from Python via `BatchSimulator.heuristic`.
 pub const HEURISTIC_WALLCLOCK: u8 = 0;
 pub const HEURISTIC_PROXY: u8 = 1;
 
@@ -257,8 +257,8 @@ pub const HEURISTIC_PROXY: u8 = 1;
 /// simulator doesn't carry a dozen more top-level fields. Holds the heuristic selector and its
 /// tuning, the measured-throughput EMAs, the probe schedule, and read-only observability counters.
 ///
-/// Exposed to Python as a read-only snapshot via `SimulatorCRNMultiBatch.switch`; the two config
-/// knobs are also get/set via `SimulatorCRNMultiBatch.heuristic` and `.proxy_threshold`.
+/// Exposed to Python as a read-only snapshot via `BatchSimulator.switch`; the two config
+/// knobs are also get/set via `BatchSimulator.heuristic` and `.proxy_threshold`.
 #[pyclass]
 #[derive(Clone)]
 pub struct SwitchState {
@@ -380,7 +380,7 @@ impl SwitchState {
 }
 
 #[pyclass(extends = Simulator)]
-pub struct SimulatorCRNMultiBatch {
+pub struct BatchSimulator {
     /// The CRN with a list of reactions, so we can recompute probabilities when the
     /// count of K is updated between batches.
     pub crn: UniformCRN,
@@ -503,8 +503,8 @@ pub struct SimulatorCRNMultiBatch {
 }
 
 #[pymethods]
-impl SimulatorCRNMultiBatch {
-    /// Initializes the main data structures for SimulatorCRNMultiBatch.
+impl BatchSimulator {
+    /// Initializes the main data structures for BatchSimulator.
     /// We take numpy arrays as input because that's how n-dimensional arrays are represented in python.
     /// We convert those numpy arrays into rust ndarrray::ArrayD for storage.
     ///
@@ -602,7 +602,7 @@ impl SimulatorCRNMultiBatch {
         // The proxy heuristic's default threshold is the reaction count (the original rule).
         let switch = SwitchState::new(crn.reactions.len() as f64);
 
-        let mut simulator = SimulatorCRNMultiBatch {
+        let mut simulator = BatchSimulator {
             crn,
             n,
             n_including_extra_species,
@@ -1245,7 +1245,7 @@ fn make_batch_result(dimensions: usize, length: usize) -> NDBatchResult {
     result
 }
 
-impl SimulatorCRNMultiBatch {
+impl BatchSimulator {
     /// Choose the engine for the next iteration (`true` = Gillespie), maintaining the
     /// `just_started_gillespie` / `just_finished_gillespie` transition flags exactly as the
     /// original switching code did, so the one-time rebuild still fires on a real transition.
@@ -1267,7 +1267,7 @@ impl SimulatorCRNMultiBatch {
 
     /// Run one batch of reactions, on average O(sqrt(n)) of them, some of which will typically be passive.
     /// Returns after simulating one batch, and does not necessarily run until `t_max`.
-    /// Updates the urn and any relevant variables; the `SimulatorCRNMultiBatch` should be in a valid state afterward.
+    /// Updates the urn and any relevant variables; the `BatchSimulator` should be in a valid state afterward.
     fn batch_step(&mut self, t_max: f64) -> () {
         self.updated_counts.reset();
         assert_eq!(
