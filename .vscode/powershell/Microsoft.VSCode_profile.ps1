@@ -20,6 +20,6 @@ if (Test-Path $venvPath) {
     "Virtual environment not found"
 }
 
-# This avoids all the "Requirement already satisfied" messages when 
-# installing the ppsim package locally when running `maturin develop`.
+# This avoids all the "Requirement already satisfied" messages when
+# installing the batss package locally when running `maturin develop`.
 $env:PIP_QUIET = 1

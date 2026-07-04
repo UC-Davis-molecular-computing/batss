@@ -1,4 +1,4 @@
-# VSCode Configuration for ppsim-rust
+# VSCode Configuration for batss
 
 This document explains the VSCode configuration that has been set up to resolve the issue with Conda and virtual environment conflicts when using maturin.
 

@@ -9,7 +9,7 @@
                 "args": [
                     "build",
                     "--bin=main",
-                    "--package=ppsim"
+                    "--package=batss"
                 ],
                 "filter": {
                     "name": "main",
@@ -34,13 +34,6 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python Debug examples/lotka_volterra_testing.py",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "examples/lotka_volterra_testing.py",
-            "console": "integratedTerminal"
-        },
-        {
             "name": "Python Debug examples/lotka_volterra_plotting.py",
             "type": "debugpy",
             "request": "launch",
@@ -48,10 +41,10 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python Debug examples/crn_script.py",
+            "name": "Python Debug examples/rossler_plotting.py",
             "type": "debugpy",
             "request": "launch",
-            "program": "examples/crn_script.py",
+            "program": "examples/rossler_plotting.py",
             "console": "integratedTerminal"
         },
         {
@@ -59,20 +52,6 @@
             "type": "debugpy",
             "request": "launch",
             "program": "gamma.py",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Python Debug examples/test_sequential.py",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "examples/test_sequential.py",
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Python Debug examples/generate_sequential_samples.py",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "examples/generate_sequential_samples.py",
             "console": "integratedTerminal"
         },
         {

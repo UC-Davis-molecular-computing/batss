@@ -20,7 +20,7 @@ The general syntax is
     sim.run()
     sim.history.plot()
 
-More examples given in https://github.com/UC-Davis-molecular-computing/ppsim/tree/main/examples
+More examples given in https://github.com/UC-Davis-molecular-computing/batss/tree/main/examples
 
 :func:`time_trials` is a convenience function used for gathering data about the
 convergence time of a protocol.
@@ -55,8 +55,8 @@ Type representing transition rules for protocol. Is one of three types:
 
 - a function that takes two states and returns either a tuple of two states or a dictionary mapping pairs of states to probabilities.
 - a dictionary mapping pairs of states to either a tuple of two states or a dictionary mapping pairs of states to probabilities.
-- a list of :class:`ppsim.crn.Reaction` objects describing a CRN, which will be passed as a CRN if the simulator method is CRN,
-or will be converted into a population protocol if it's using original ppsim-style multibatching.
+- a list of :class:`batss.crn.Reaction` objects describing a CRN, which will be passed as a CRN if the simulator method is CRN,
+or will be converted into a population protocol if it's using original batss-style multibatching.
 """
 
 ConvergenceDetector: TypeAlias = Callable[[dict[State, int]], bool]
@@ -179,7 +179,7 @@ class Simulation:
 
     snapshots: list[Snapshot]
     """
-    A list of :class:`ppsim.snapshot.Snapshot` objects, which get periodically called during the 
+    A list of :class:`batss.snapshot.Snapshot` objects, which get periodically called during the
     running of the simulation to give live updates.
     """
 
@@ -228,7 +228,7 @@ class Simulation:
                 mapping tuples of states to probabilities. Inputs that are not present
                 in the dictionary, or return None from the function, are interpreted as
                 passive transitions that return the same pair of states as the output.
-                The third option is a list of :class:`ppsim.crn.Reaction` objects describing a CRN,
+                The third option is a list of :class:`batss.crn.Reaction` objects describing a CRN,
                 which will be parsed into an equivalent population protocol.
 
             simulator_method: Which Simulator method to use, either ``'MultiBatch'``
@@ -272,7 +272,7 @@ class Simulation:
             seed: An optional integer used as the seed for all pseudorandom number
                 generation. Defaults to None.
 
-            volume: If a list of :class:`ppsim.crn.Reaction` objects is given for a CRN, then
+            volume: If a list of :class:`batss.crn.Reaction` objects is given for a CRN, then
                 the parameter volume can be passed in here. Defaults to None.
                 If None, the volume will be assumed to be the population size n.
 
@@ -594,7 +594,7 @@ class Simulation:
             stopping_interval: The length to run the simulator before checking for the stop
                 condition.
 
-            timer: If True, and there are no other snapshot objects, a default :class:`ppsim.snapshot.TimeUpdate`
+            timer: If True, and there are no other snapshot objects, a default :class:`batss.snapshot.TimeUpdate`
                 snapshot will be created to print updates with the current time.
                 Defaults to True.
         """
@@ -905,10 +905,10 @@ class Simulation:
             snapshot.update(index=index)
 
     def add_snapshot(self, snap: Snapshot) -> None:
-        """Add a new :class:`ppsim.snapshot.Snapshot` to :data:`Simulation.snapshots`.
+        """Add a new :class:`batss.snapshot.Snapshot` to :data:`Simulation.snapshots`.
 
         Args:
-            snap: The :class:`ppsim.snapshot.Snapshot` object to be added.
+            snap: The :class:`batss.snapshot.Snapshot` object to be added.
         """
         snap.simulation = self
         snap.initialize()
@@ -916,7 +916,7 @@ class Simulation:
         self.snapshots.append(snap)
 
     def snapshot_slider(self, var: str = "index") -> "Any":
-        """Returns a slider that updates all :class:`ppsim.snapshot.Snapshot` objects.
+        """Returns a slider that updates all :class:`batss.snapshot.Snapshot` objects.
 
         Returns a slider from the ipywidgets library.
 

@@ -40,15 +40,15 @@ class Snapshot(ABC):
 
     simulation: Optional["Simulation"]
     """
-    The :class:`ppsim.simulation.Simulation` object that initialized and will update the :class:`Snapshot`.
-    This attribute gets set when the :class:`ppsim.simulation.Simulation` object calls 
-    :meth:`ppsim.simulation.Simulation.add_snapshot`.
+    The :class:`batss.simulation.Simulation` object that initialized and will update the :class:`Snapshot`.
+    This attribute gets set when the :class:`batss.simulation.Simulation` object calls 
+    :meth:`batss.simulation.Simulation.add_snapshot`.
     """
 
     update_time: float
     """
     How many seconds will elapse between calls to update while in the 
-    :meth:`ppsim.simulation.Simulation.run` method of :class:`ppsim.simulation.Simulation`.
+    :meth:`batss.simulation.Simulation.run` method of :class:`batss.simulation.Simulation`.
     """
 
     time: float
@@ -72,7 +72,7 @@ class Snapshot(ABC):
         Init constructor for the base class.
 
         Parameters can be passed in here, and any attributes that can be defined
-        without the parent :class:`ppsim.simulation.Simulation` object can be instantiated here,
+        without the parent :class:`batss.simulation.Simulation` object can be instantiated here,
         such as :data:`Snapshot.update_time`.
         """
         self.simulation = None
@@ -82,8 +82,8 @@ class Snapshot(ABC):
         self.next_snapshot_time = 0.0
 
     def initialize(self) -> None:
-        """Method which is called once during :meth:`ppsim.simulation.Simulation.add_snapshot`.
-        Should only be called after :meth:`ppsim.simulation.Simulation.add_snapshot` is called.
+        """Method which is called once during :meth:`batss.simulation.Simulation.add_snapshot`.
+        Should only be called after :meth:`batss.simulation.Simulation.add_snapshot` is called.
 
         Any initialization that requires accessing the data in :data:`Snapshot.simulation`
         should go here.
@@ -96,9 +96,9 @@ class Snapshot(ABC):
 
         Args:
             index: An optional integer index. If present, the snapshot will use the
-                data from configuration :data:`ppsim.simulation.Simulation.configs` ``[index]`` and time
-                :data:`ppsim.simulation.Simulation.times` ``[index]``. Otherwise, the snapshot will use the current
-                configuration :meth:`ppsim.simulation.Simulation.config_array` and current time.
+                data from configuration :data:`batss.simulation.Simulation.configs` ``[index]`` and time
+                :data:`batss.simulation.Simulation.times` ``[index]``. Otherwise, the snapshot will use the current
+                configuration :meth:`batss.simulation.Simulation.config_array` and current time.
         """
         if self.simulation is None:
             raise ValueError("self.simulation is None, cannot call self.update until using sim.add_snapshot")
@@ -113,9 +113,9 @@ class Snapshot(ABC):
 @dataclass
 class TimeUpdate(Snapshot):
     """
-    Simple :class:`Snapshot` that prints the current time in the :class:`ppsim.simulation.Simulation`.
+    Simple :class:`Snapshot` that prints the current time in the :class:`batss.simulation.Simulation`.
 
-    When calling :class:`ppsim.simulation.Simulation.run`, if :data:`ppsim.simulation.Simulation.snapshots` is empty,
+    When calling :class:`batss.simulation.Simulation.run`, if :data:`batss.simulation.Simulation.snapshots` is empty,
     then this object will get added to provide a basic progress update.
     """
 
@@ -204,7 +204,7 @@ class Plotter(Snapshot):
             state_map: An optional function mapping states to categories.
                 If None, then the state itself will be used as the category.
             update_time: How many seconds will elapse between calls to update while
-                :class:`ppsim.simulation.Simulation.run` method.
+                :class:`batss.simulation.Simulation.run` method.
             yscale: The scale used for the yaxis, passed into ax.set_yscale.
                 Defaults to 'linear'.
         """

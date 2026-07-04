@@ -119,7 +119,7 @@ def replace_reversible_rxns(rxns: Iterable[Reaction]) -> list[Reaction]:
 def reactions_to_dict(reactions: Iterable[Reaction], n: int, volume: float) -> tuple[dict[SpeciePair, Output], float]:
     """
     Returns dict representation of `reactions`, transforming unimolecular reactions to bimolecular,
-    and converting rates to probabilities, also returning the max rate so the :class:`ppsim.simulation.Simulation` knows
+    and converting rates to probabilities, also returning the max rate so the :class:`batss.simulation.Simulation` knows
     how to scale time.
 
     Args:
@@ -809,10 +809,10 @@ def gpac_format(
 
     Args:
         rxns: reactions to translate to gpac
-        init_config: dict mapping each (ppsim) :class:`Specie` to its initial count
+        init_config: dict mapping each (batss) :class:`Specie` to its initial count
 
     Returns:
-        A tuple of (reactions, config) essentially equivalent to the ppsim init_config and rxns
+        A tuple of (reactions, config) essentially equivalent to the batss init_config and rxns
         but using the gpac package's versions of those data structures.
     """
     pp_species_set = set()

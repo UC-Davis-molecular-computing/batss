@@ -6,32 +6,6 @@ import rebop as rb
 import json
 from collections import defaultdict
 
-import importlib.util
-from pathlib import Path
-import sys
-
-if False:
-    # Path to your renamed .pyd file
-    # custom_pyd_path = Path("C:/Dropbox/git/ppsim-rust/python/ppsim/ppsim_rust/ppsim_rust.cp312-win_amd64_rebop.pyd")
-    # custom_pyd_path = Path("C:/Dropbox/git/ppsim-rust/python/ppsim/ppsim_rust/ppsim_rust.cp312-win_amd64_f128.pyd")
-    # custom_pyd_path = Path("C:/Dropbox/git/ppsim-rust/python/ppsim/ppsim_rust/ppsim_rust.cp312-win_amd64_2.pyd")
-    # custom_pyd_path = Path("C:/Dropbox/git/ppsim-rust/python/ppsim/ppsim_rust/ppsim_rust.cp312-win_amd64_bugfix_jul10.pyd")
-    custom_pyd_path = Path(
-        "C:/Dropbox/git/ppsim-rust/python/ppsim/ppsim_rust/ppsim_rust.cp312-win_amd64)bugfix_jul10_fastpp.pyd"
-    )
-
-    # Define a custom finder and loader for .pyd files
-    class CustomPydFinder:
-        @classmethod
-        def find_spec(cls, fullname, path=None, target=None):
-            # Only handle the specific module we want to redirect
-            if fullname == "batss.batss_rust.batss_rust":
-                return importlib.util.spec_from_file_location(fullname, str(custom_pyd_path))
-            return None
-
-    # Register our custom finder at the beginning of the meta_path
-    sys.meta_path.insert(0, CustomPydFinder)
-
 import batss as bt
 
 

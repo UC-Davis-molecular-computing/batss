@@ -1,19 +1,23 @@
+"""Unit tests for the batss package.
+
+Modernized from the old ``ppsim_tests.py`` (the package was renamed ppsim -> batss):
+
+- The import now comes from ``batss`` instead of the dead ``ppsim`` module.
+- The ``TestCRN`` cases (which exercise ``reactions_to_dict``) are unchanged; they
+  already use the current species/reaction API.
+- The old string-based population-protocol ``test_fratricide`` was removed: the
+  bare-string state API is gone and the CRN-only simulator no longer supports the
+  population-protocol engine or ``enabled_reactions``. It is replaced by
+  ``TestCRNSimulation``, which drives the actual ``crn`` simulator end to end,
+  including a regression test for the Gillespie-sync hang (see
+  ``CHANGES_2026-07-03.md``).
+"""
+
 import unittest
 from typing import List, Dict, Any
 
 import numpy
-from ppsim import species, reactions_to_dict, Reaction, Simulation
-
-
-class TestBasicProtocols(unittest.TestCase):
-
-    def test_fratricide(self) -> None:
-        live, fire = 'L', 'F'
-        fratricide = {(live, live): (live, fire)}
-        sim = Simulation({live: 20}, fratricide)
-        sim.run()
-        self.assertEqual(sim.config_dict, {live: 1, fire: 19})
-        self.assertEqual('', sim.enabled_reactions)
+from batss import species, reactions_to_dict, Reaction, Simulation
 
 
 class TestCRN(unittest.TestCase):
@@ -147,6 +151,57 @@ class TestCRN(unittest.TestCase):
         self.assertEqual((a, b), transitions[(c, d)])
 
 
+class TestCRNSimulation(unittest.TestCase):
+    # end-to-end tests of the crn simulator (batss_rust.SimulatorCRNMultiBatch)
+
+    def test_fratricide_converges(self) -> None:
+        """The reaction 2 L -> L + F is the CRN form of the fratricide population
+        protocol. Starting from 20 L it must converge deterministically to a single
+        surviving L and 19 F (each reaction consumes an L, and no reaction is possible
+        once only one L remains). This replaces the old string-API population-protocol
+        test. Special bookkeeping species (K, W) are filtered out of the config.
+        """
+        L, F = species('L F')
+        sim = Simulation({L: 20}, [2 * L >> L + F], seed=1)
+        sim.run()  # run_until=None: run until silent (no reaction possible)
+        real_config = {sp: count for sp, count in sim.config_dict.items() if not sp.is_special_specie}
+        self.assertEqual({L: 1, F: 19}, real_config)
+
+    def test_gillespie_switch_reaches_target_time(self) -> None:
+        """Regression test for a hang in the crn simulator.
+
+        When the simulator switched to Gillespie mode it failed to sync rebop's
+        updated species counts back into its internal urn, so propensity (and the
+        batch/Gillespie switching heuristic) kept using the stale configuration from
+        when Gillespie mode was entered. For a stiff CRN like the Oregonator that
+        made the per-call time advance minuscule, so the simulation appeared to hang.
+
+        The Oregonator at n=1000 switches to Gillespie almost immediately. On a
+        correct build the raw simulator reaches t_max in well under a second; the 15s
+        wallclock cap turns a regression (time crawling forward) into a fast test
+        failure instead of an indefinite hang. See CHANGES_2026-07-03.md.
+        """
+        x1, x2, x3 = species('X1 X2 X3')
+        rxns = [
+            (x2 >> x1).k(0.0871),
+            (x2 + x1 >> None).k(1.6 * 10**9),
+            (x1 >> 2 * x1 + x3).k(520),
+            (2 * x1 >> None).k(4 * 10**7),
+            (x3 >> x2).k(443.324),
+            (x3 >> None).k(2.676),
+        ]
+        n = 1000
+        inits = {x1: n // 6, x2: 4 * n // 6, x3: n // 6}
+        sim = Simulation(inits, rxns, simulator_method='crn', continuous_time=True, seed=1)
+        end_time = 8.0
+        sim.simulator.run(end_time, 15.0)  # (t_max, max_wallclock_seconds)
+        self.assertGreaterEqual(
+            sim.simulator.continuous_time,
+            end_time,
+            "crn simulator failed to reach t_max within the wallclock cap; "
+            "the Gillespie-sync hang may have regressed",
+        )
+
 
 # taken from https://stackoverflow.com/questions/23549419/assert-that-two-dictionaries-are-almost-equal
 def assertDeepAlmostEqual(test_case: unittest.TestCase, expected: Any, actual: Any,
@@ -198,5 +253,9 @@ def assertDeepAlmostEqual(test_case: unittest.TestCase, expected: Any, actual: A
         exc.__dict__.setdefault('traces', []).append(trace)
         if is_root:
             trace = ' -> '.join(reversed(exc.traces))
-            exc = AssertionError("%s\nTRACE: %s" % (exc.message, trace))
+            exc = AssertionError("%s\nTRACE: %s" % (str(exc), trace))
         raise exc
+
+
+if __name__ == '__main__':
+    unittest.main()

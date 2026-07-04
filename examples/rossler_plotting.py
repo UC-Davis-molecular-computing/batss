@@ -1,24 +1,3 @@
-import sys
-import importlib.util
-from pathlib import Path
-
-if False:
-    # Path to your renamed .pyd file
-    custom_pyd_path = Path("C:/Dropbox/git/ppsim-rust/python/ppsim/ppsim_rust/ppsim_rust.cp312-win_amd64_2.pyd")
-
-    # Define a custom finder and loader for .pyd files
-    class CustomPydFinder:
-        @classmethod
-        def find_spec(cls, fullname, path=None, target=None):
-            # Only handle the specific module we want to redirect
-            if fullname == "batss.batss_rust.batss_rust":
-                return importlib.util.spec_from_file_location(fullname, str(custom_pyd_path))
-            return None
-
-    # Register our custom finder at the beginning of the meta_path
-    sys.meta_path.insert(0, CustomPydFinder)
-
-
 import batss as bt
 from matplotlib import pyplot as plt
 import rebop as rb
@@ -77,10 +56,10 @@ def main():
     # print(results_rebop)
     # print(np.linspace(0, end_time, num_samples + 1))
     # print(sim.history['A'])
-    # ax.plot(sim.history['K'], label = 'K (ppsim)')
-    ax.plot(sim.history["X1"], label="X1 (ppsim)")
-    ax.plot(sim.history["X2"], label="X2 (ppsim)")
-    ax.plot(sim.history["X3"], label="X3 (ppsim)")
+    # ax.plot(sim.history['K'], label = 'K (batss)')
+    ax.plot(sim.history["X1"], label="X1 (batss)")
+    ax.plot(sim.history["X2"], label="X2 (batss)")
+    ax.plot(sim.history["X3"], label="X3 (batss)")
     # ax2.plot(np.linspace(0, end_time, num_samples + 1), sim.history['A'], label='A (ppsim)')
     # ax2.plot(np.linspace(0, end_time, num_samples + 1), sim.history['B'], label='B (ppsim)')
     # ax.hist([results_rebop['A'], results_rebop['B']], bins = np.linspace(0, n, 20),
