@@ -76,12 +76,18 @@ def _spec_species_names(spec: CRNSpec) -> list[str]:
 
 
 def _batss_sim(spec: CRNSpec, n: int, seed: int) -> Simulation:
+    # Pass volume=n explicitly rather than letting batss default it to the sum of
+    # initial counts. This keeps the volume convention identical to _rebop_crn
+    # (which divides a k-reactant rate by n**(k-1)) even when the initial counts
+    # don't sum to n -- e.g. an initial condition placed on a limit cycle, whose
+    # concentrations sum to less than 1.
     return Simulation(
         spec.inits_from_n(n),
         spec.rxns,
         simulator_method="crn",
         continuous_time=True,
         seed=seed,
+        volume=n,
     )
 
 
@@ -226,14 +232,14 @@ def plot_runtimes(
 # --- plot 2: trajectory + passive-reaction fraction ---------------------------
 
 
-def _passive_fractions(sim: Simulation) -> tuple[list[float], list[float]]:
+def _non_passive_fractions(sim: Simulation) -> tuple[list[float], list[float]]:
     # Intervals with zero total steps (always the first and last, sometimes
     # others at small n) would divide by zero — drop them.
     total = np.array(sim.discrete_batched_steps_total_last_run)
-    non_null = np.array(sim.discrete_batched_steps_no_passives_last_run)
+    non_passive = np.array(sim.discrete_batched_steps_no_passives_last_run)
     all_times = sim.history.index.tolist()
-    times = [t for t, n in zip(all_times, total) if n > 0]
-    fractions = [(n - m) / n for n, m in zip(total, non_null) if n > 0]
+    times = [t for t, tot in zip(all_times, total) if tot > 0]
+    fractions = [m / tot for tot, m in zip(total, non_passive) if tot > 0]
     return times, fractions
 
 
@@ -241,65 +247,90 @@ def plot_trajectory(
     spec: CRNSpec,
     n: int,
     end_time: float,
+    backend: str = "batss",
     data_dir: str | Path = "data",
     seed: int = 1,
     num_samples: int = 1000,
     species: list[str] | None = None,
-    with_passive: bool = True,
+    with_nonpassive: bool = True,
     figsize: tuple[float, float] = (8, 4),
     ax: Axes | None = None,
 ) -> Axes:
-    """Simulate ``spec`` with batss at population size ``n`` and plot counts vs time.
+    """Simulate ``spec`` with ``backend`` at population size ``n`` and plot counts vs time.
+
+    ``backend`` is either ``"batss"`` (the default) or ``"rebop"``.
 
     The count y-axis starts at 0 (so the x-axis sits at y=0). When
-    ``with_passive=True``, the fraction of passive (null) reactions is drawn as
-    a dashed line on a second y-axis (range [0, 1]) so it's visually distinct
-    from the count curves.
+    ``with_nonpassive=True`` and ``backend == "batss"``, the fraction of
+    non-passive (real) reactions is drawn as a dashed line on a second y-axis
+    (range [0, 1]) so it's visually distinct from the count curves. rebop has
+    no notion of passive reactions, so that line is omitted (with a printed
+    note) for that backend.
 
     ``species`` is a list of species-name strings to plot; defaults to the
     species named in ``spec.rxns``.
 
-    The figure is saved to ``<data_dir>/<spec.name>_trajectory_n<n>_t<end_time>.pdf``.
+    The figure is saved to
+    ``<data_dir>/<spec.name>_trajectory_<backend>_n<n>_t<end_time>.pdf``.
     """
+    if backend not in ("batss", "rebop"):
+        raise ValueError(f"unknown backend: {backend!r}")
+
     # write n as $10^e$ if n is a power of 10, otherwise with commas
     exp = int(round(np.log10(n))) if n > 0 else -1
     n_str = f"$10^{{{exp}}}$" if exp >= 0 and 10**exp == n else f"{n:,}"
-    sim = _batss_sim(spec, n, seed)
-    print(f"running batss for {spec.name} at n={n_str}")
-    sim.run(end_time, end_time / num_samples)
+
+    species_to_plot = species if species is not None else _spec_species_names(spec)
+
+    print(f"running {backend} for {spec.name} at n={n_str}")
+    sim: Simulation | None = None
+    if backend == "batss":
+        sim = _batss_sim(spec, n, seed)
+        sim.run(end_time, end_time / num_samples)
+        times = sim.history.index
+        counts = {sp: sim.history[sp] for sp in species_to_plot}
+    else:
+        crn, inits = _rebop_crn(spec, n)
+        ds = crn.run(inits, end_time, num_samples, rng=seed)
+        times = ds["time"]
+        counts = {sp: ds[sp] for sp in species_to_plot}
 
     if ax is None:
         _, ax = plt.subplots(figsize=figsize)
 
-    species_to_plot = species if species is not None else _spec_species_names(spec)
     for sp in species_to_plot:
-        ax.plot(sim.history[sp], label=sp)
+        ax.plot(times, counts[sp], label=sp)
     ax.set_xlabel("time")
     ax.set_ylabel("count")
     ax.set_ylim(bottom=0)
 
     handles, labels = ax.get_legend_handles_labels()
 
-    if with_passive:
-        times, fractions = _passive_fractions(sim)
+    if with_nonpassive and backend == "rebop":
+        print(
+            "note: the non-passive reaction fraction is only available for "
+            "backend='batss' (rebop has no passive reactions); skipping it."
+        )
+    if with_nonpassive and sim is not None:
+        times_p, fractions = _non_passive_fractions(sim)
         ax2 = ax.twinx()
         ax2.plot(
-            times,
+            times_p,
             fractions,
-            label="passive",
+            label="non-passive",
             linestyle="--",
             color="#d62728",
         )
-        ax2.set_ylabel("fraction of passive reactions")
+        ax2.set_ylabel("fraction of non-passive reactions")
         ax2.set_ylim(0.0, 1.0)
         h2, l2 = ax2.get_legend_handles_labels()
         handles += h2
         labels += l2
 
     ax.legend(handles, labels, loc="lower right")
-    ax.set_title(f"{spec.name}: n={n_str}")
+    ax.set_title(f"{spec.name}: {backend}, n={n_str}")
 
-    out_path = Path(data_dir) / f"{spec.name}_trajectory_n{n}_t{end_time}.pdf"
+    out_path = Path(data_dir) / f"{spec.name}_trajectory_{backend}_n{n}_t{end_time}.pdf"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, bbox_inches="tight")
     return ax
