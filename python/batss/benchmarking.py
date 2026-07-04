@@ -115,8 +115,11 @@ def _rebop_crn(spec: CRNSpec, n: int) -> tuple[rb.Gillespie, dict[str, int]]:
 # --- plot 1: runtime vs population size ---------------------------------------
 
 
-def _runtime_path(data_dir: Path, spec: CRNSpec, backend: str, end_time: float) -> Path:
-    return data_dir / f"{spec.name}_runtime_{backend}_t{end_time}.json"
+def _runtime_path(data_dir: Path, spec: CRNSpec, backend: str, end_time: float, proxy: bool = False) -> Path:
+    # The proxy heuristic caches to its own file so switching heuristics doesn't silently reuse (or
+    # overwrite) the wall-clock results. Only batss has a heuristic, so ``proxy`` only tags batss.
+    suffix = "_proxy" if proxy else ""
+    return data_dir / f"{spec.name}_runtime_{backend}{suffix}_t{end_time}.json"
 
 
 def _load_runtime_json(path: Path) -> dict[int, float]:
@@ -139,6 +142,7 @@ def benchmark_runtimes(
     backends: tuple[str, ...] = ("batss", "rebop"),
     seed: int = 1,
     overwrite: bool = False,
+    heuristic: bool = False,
 ) -> None:
     """Time one run to ``spec.benchmark_end_time`` for each (backend, n) and cache to JSON.
 
@@ -150,7 +154,7 @@ def benchmark_runtimes(
     end_time = spec.benchmark_end_time
     data_dir = Path(data_dir)
     for backend in backends:
-        path = _runtime_path(data_dir, spec, backend, end_time)
+        path = _runtime_path(data_dir, spec, backend, end_time, proxy=heuristic and backend == "batss")
         data = {} if overwrite else _load_runtime_json(path)
         print(f"benchmarking {spec.name} on {backend} -> {path}")
 
@@ -162,6 +166,7 @@ def benchmark_runtimes(
 
             if backend == "batss":
                 sim = _batss_sim(spec, n, seed)
+                sim.simulator.heuristic = 1 if heuristic else 0
 
                 def run() -> None:
                     sim.run(end_time, end_time, timer=False)
@@ -192,6 +197,7 @@ def plot_runtimes(
     pop_sizes: Iterable[int] | None = None,
     figsize: tuple[float, float] = (5, 4),
     ax: Axes | None = None,
+    heuristic: bool = False,
 ) -> Axes:
     """Load cached runtimes and overlay them on log-log axes.
 
@@ -209,14 +215,16 @@ def plot_runtimes(
     wanted = set(pop_sizes) if pop_sizes is not None else None
     markers = {"batss": "o", "rebop": "^"}
     for backend in backends:
-        path = _runtime_path(data_dir, spec, backend, end_time)
+        proxy = heuristic and backend == "batss"
+        path = _runtime_path(data_dir, spec, backend, end_time, proxy=proxy)
         data = _load_runtime_json(path)
         if not data:
             print(f"no runtime data for {backend} at {path}")
             continue
         ns = sorted(n for n in data if wanted is None or n in wanted)
         ts = [data[n] for n in ns]
-        ax.loglog(ns, ts, label=backend, marker=markers.get(backend, "o"))
+        label = f"{backend} (proxy)" if proxy else backend
+        ax.loglog(ns, ts, label=label, marker=markers.get(backend, "o"))
 
     ax.set_xlabel("initial molecular count")
     ax.set_ylabel("run time (s)")
@@ -256,6 +264,7 @@ def plot_trajectory(
     figsize: tuple[float, float] = (8, 4),
     ax: Axes | None = None,
     loc: str = "best",
+    heuristic: bool = False,
 ) -> Axes:
     """Simulate ``spec`` with ``backend`` at population size ``n`` and plot counts vs time.
 
@@ -287,6 +296,7 @@ def plot_trajectory(
     sim: Simulation | None = None
     if backend == "batss":
         sim = _batss_sim(spec, n, seed)
+        sim.simulator.heuristic = 1 if heuristic else 0  # must be set BEFORE run(), not after
         sim.run(end_time, end_time / num_samples)
         times = sim.history.index
         counts = {sp: sim.history[sp] for sp in species_to_plot}

@@ -8,13 +8,14 @@ pub mod urn;
 pub mod util;
 
 use simulator_abstract::Simulator;
-use simulator_crn::SimulatorCRNMultiBatch;
+use simulator_crn::{SimulatorCRNMultiBatch, SwitchState};
 
 /// A Python module implemented in Rust.
 #[pymodule]
 fn batss_rust(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Simulator>()?;
     m.add_class::<SimulatorCRNMultiBatch>()?;
+    m.add_class::<SwitchState>()?;
     Ok(())
 }
 

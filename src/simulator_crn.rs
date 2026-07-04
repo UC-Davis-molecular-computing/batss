@@ -247,6 +247,138 @@ impl UniformCRN {
         return factor;
     }
 }
+
+/// Which heuristic decides, before each iteration, whether the next reactions run faster in the
+/// batching engine or in Gillespie mode. Settable from Python via `SimulatorCRNMultiBatch.heuristic`.
+pub const HEURISTIC_WALLCLOCK: u8 = 0;
+pub const HEURISTIC_PROXY: u8 = 1;
+
+/// All state for the batch/Gillespie mode-switching heuristic, grouped into one struct so the
+/// simulator doesn't carry a dozen more top-level fields. Holds the heuristic selector and its
+/// tuning, the measured-throughput EMAs, the probe schedule, and read-only observability counters.
+///
+/// Exposed to Python as a read-only snapshot via `SimulatorCRNMultiBatch.switch`; the two config
+/// knobs are also get/set via `SimulatorCRNMultiBatch.heuristic` and `.proxy_threshold`.
+#[pyclass]
+#[derive(Clone)]
+pub struct SwitchState {
+    // --- configuration (selects and tunes the heuristic) ---
+    /// HEURISTIC_WALLCLOCK (0, default): switch by measured wall-clock per unit continuous time.
+    /// HEURISTIC_PROXY (1): use only the original reaction-count rule (no timing, no probing).
+    #[pyo3(get)]
+    pub heuristic: u8,
+    /// Reaction-count rule threshold: prefer Gillespie when the expected number of non-passive
+    /// reactions in the next batch is below this. Defaults to the reaction count (the original
+    /// rule). Raise it to model batch mode's fixed per-batch overhead -- i.e. require more expected
+    /// non-passive reactions before batching is worth it.
+    #[pyo3(get)]
+    pub proxy_threshold: f64,
+
+    // --- measured throughput, per mode ---
+    // Exponentially-weighted moving averages of wall-clock seconds and continuous time advanced per
+    // engine call. A mode's cost is their RATIO (wall_ema / dt_ema): a dt-weighted average, which is
+    // the right figure of merit since we minimize wall-clock per unit continuous time. Averaging
+    // elapsed/dt per call instead would wrongly weight tiny-dt calls equally with large-dt ones --
+    // Gillespie's dt per call swings by orders of magnitude with the propensity, so that bias is
+    // severe (it was the original measurement bug; see GILLESPIE_SWITCH_LOGIC.md).
+    batch_wall_ema: f64,
+    batch_dt_ema: f64,
+    gillespie_wall_ema: f64,
+    gillespie_dt_ema: f64,
+    has_batch_est: bool,
+    has_gillespie_est: bool,
+
+    // --- probe schedule ---
+    /// Run-loop iterations since we last probed the non-current mode.
+    iters_since_probe: u64,
+    /// Remaining iterations in an in-flight probe of the non-current mode (0 = not probing).
+    probe_remaining: u64,
+
+    // --- read-only observability (no effect on the decision) ---
+    #[pyo3(get)]
+    pub batch_wallclock_seconds: f64,
+    #[pyo3(get)]
+    pub gillespie_wallclock_seconds: f64,
+    #[pyo3(get)]
+    pub batch_continuous_time: f64,
+    #[pyo3(get)]
+    pub gillespie_continuous_time: f64,
+    #[pyo3(get)]
+    pub batch_calls: u64,
+    #[pyo3(get)]
+    pub gillespie_calls: u64,
+    #[pyo3(get)]
+    pub mode_switches: u64,
+    #[pyo3(get)]
+    pub switch_overhead_seconds: f64,
+}
+
+impl SwitchState {
+    fn new(proxy_threshold: f64) -> Self {
+        SwitchState {
+            heuristic: HEURISTIC_WALLCLOCK,
+            proxy_threshold,
+            batch_wall_ema: 0.0,
+            batch_dt_ema: 0.0,
+            gillespie_wall_ema: 0.0,
+            gillespie_dt_ema: 0.0,
+            has_batch_est: false,
+            has_gillespie_est: false,
+            iters_since_probe: 0,
+            probe_remaining: 0,
+            batch_wallclock_seconds: 0.0,
+            gillespie_wallclock_seconds: 0.0,
+            batch_continuous_time: 0.0,
+            gillespie_continuous_time: 0.0,
+            batch_calls: 0,
+            gillespie_calls: 0,
+            mode_switches: 0,
+            switch_overhead_seconds: 0.0,
+        }
+    }
+
+    /// A mode's estimated cost as wall-clock per unit continuous time: wall EMA / dt EMA (a
+    /// dt-weighted average). `true` = Gillespie, `false` = batch. Meaningful only when `has_est`.
+    fn wdt(&self, gillespie: bool) -> f64 {
+        if gillespie {
+            self.gillespie_wall_ema / self.gillespie_dt_ema
+        } else {
+            self.batch_wall_ema / self.batch_dt_ema
+        }
+    }
+
+    /// Whether a mode's EMAs hold a real measurement yet (`true` = Gillespie).
+    fn has_est(&self, gillespie: bool) -> bool {
+        if gillespie {
+            self.has_gillespie_est
+        } else {
+            self.has_batch_est
+        }
+    }
+
+    /// Fold one engine call's wall-clock (`wall`) and continuous-time-advanced (`dt`, > 0) into a
+    /// mode's EMAs (`true` = Gillespie).
+    fn record(&mut self, gillespie: bool, wall: f64, dt: f64) {
+        if gillespie {
+            if self.has_gillespie_est {
+                self.gillespie_wall_ema = WDT_EMA_ALPHA * wall + (1.0 - WDT_EMA_ALPHA) * self.gillespie_wall_ema;
+                self.gillespie_dt_ema = WDT_EMA_ALPHA * dt + (1.0 - WDT_EMA_ALPHA) * self.gillespie_dt_ema;
+            } else {
+                self.gillespie_wall_ema = wall;
+                self.gillespie_dt_ema = dt;
+                self.has_gillespie_est = true;
+            }
+        } else if self.has_batch_est {
+            self.batch_wall_ema = WDT_EMA_ALPHA * wall + (1.0 - WDT_EMA_ALPHA) * self.batch_wall_ema;
+            self.batch_dt_ema = WDT_EMA_ALPHA * dt + (1.0 - WDT_EMA_ALPHA) * self.batch_dt_ema;
+        } else {
+            self.batch_wall_ema = wall;
+            self.batch_dt_ema = dt;
+            self.has_batch_est = true;
+        }
+    }
+}
+
 #[pyclass(extends = Simulator)]
 pub struct SimulatorCRNMultiBatch {
     /// The CRN with a list of reactions, so we can recompute probabilities when the
@@ -362,6 +494,10 @@ pub struct SimulatorCRNMultiBatch {
     #[pyo3(get, set)]
     pub silent: bool,
 
+    /// All batch/Gillespie mode-switching state (heuristic selector + tuning, measurement EMAs,
+    /// probe schedule, and observability counters), grouped into one struct. See `SwitchState`.
+    switch: SwitchState,
+
     /// A module containing code for calling python-implemented collision sampling.
     pub python_module: Py<PyModule>,
 }
@@ -463,6 +599,9 @@ impl SimulatorCRNMultiBatch {
             module
         });
 
+        // The proxy heuristic's default threshold is the reaction count (the original rule).
+        let switch = SwitchState::new(crn.reactions.len() as f64);
+
         let mut simulator = SimulatorCRNMultiBatch {
             crn,
             n,
@@ -487,6 +626,7 @@ impl SimulatorCRNMultiBatch {
             just_started_gillespie,
             just_finished_gillespie,
             silent,
+            switch,
             python_module,
             // gillespie_threshold,
             // coll_table,
@@ -500,6 +640,37 @@ impl SimulatorCRNMultiBatch {
     #[getter]
     pub fn config(&self) -> Vec<u64> {
         self.urn.config.clone()
+    }
+
+    /// The batch/Gillespie switching heuristic in use: 0 = wall-clock (default), 1 = the simpler
+    /// reaction-count proxy only. Settable from Python to A/B-test heuristics empirically.
+    #[getter]
+    pub fn heuristic(&self) -> u8 {
+        self.switch.heuristic
+    }
+
+    #[setter]
+    pub fn set_heuristic(&mut self, value: u8) {
+        self.switch.heuristic = value;
+    }
+
+    /// Threshold for the reaction-count proxy rule (prefer Gillespie when the expected non-passive
+    /// reactions in the next batch fall below it). See :class:`SwitchState`.
+    #[getter]
+    pub fn proxy_threshold(&self) -> f64 {
+        self.switch.proxy_threshold
+    }
+
+    #[setter]
+    pub fn set_proxy_threshold(&mut self, value: f64) {
+        self.switch.proxy_threshold = value;
+    }
+
+    /// A read-only snapshot of the mode-switching state (config + measurement EMAs + observability
+    /// counters). See :class:`SwitchState`.
+    #[getter]
+    pub fn switch(&self) -> SwitchState {
+        self.switch.clone()
     }
 
     /// Run the simulation for a specified number of steps or until max time is reached
@@ -520,15 +691,42 @@ impl SimulatorCRNMultiBatch {
                 self.continuous_time = t_max;
                 return Ok(());
             }
+            // The current iteration's engine call is "first after a switch" if we are about to
+            // pay a rebuild / warm-up cost (initialize_gillespie_config or finalize_gillespie).
+            // Such a call is not representative of steady-state throughput and is excluded from
+            // the w/dt estimate below.
+            let first_after_switch = (self.do_gillespie && self.just_started_gillespie)
+                || (!self.do_gillespie && self.just_finished_gillespie);
+            let ct_before = self.continuous_time;
+
             if self.do_gillespie {
                 if self.just_started_gillespie {
+                    let s = Instant::now();
                     self.initialize_gillespie_config();
+                    self.switch.switch_overhead_seconds += s.elapsed().as_secs_f64();
+                    self.switch.mode_switches += 1;
                 }
+                let s = Instant::now();
                 self.gillespie_steps(t_max);
+                let elapsed = s.elapsed().as_secs_f64();
+                let dt = self.continuous_time - ct_before;
+                self.switch.gillespie_wallclock_seconds += elapsed;
+                self.switch.gillespie_continuous_time += dt;
+                self.switch.gillespie_calls += 1;
+                // Gillespie's fixed per-call cost is tiny, so even a call truncated at t_max
+                // still gives a usable w/dt; only exclude the unrepresentative first call after
+                // a switch.
+                if !first_after_switch && dt > 0.0 {
+                    self.switch.record(true, elapsed, dt);
+                }
             } else {
                 if self.just_finished_gillespie {
+                    let s = Instant::now();
                     self.finalize_gillespie();
+                    self.switch.switch_overhead_seconds += s.elapsed().as_secs_f64();
+                    self.switch.mode_switches += 1;
                 }
+                let s = Instant::now();
                 self.batch_step(t_max);
                 let current_k_count = self.urn.config[self.crn.k];
                 if (current_k_count.min(self.n) as f64) / (current_k_count.max(self.n) as f64) < K_COUNT_RATIO_THRESHOLD
@@ -536,36 +734,64 @@ impl SimulatorCRNMultiBatch {
                     self.reset_k_count();
                 }
                 self.recycle_waste();
+                let elapsed = s.elapsed().as_secs_f64();
+                let dt = self.continuous_time - ct_before;
+                self.switch.batch_wallclock_seconds += elapsed;
+                self.switch.batch_continuous_time += dt;
+                self.switch.batch_calls += 1;
+                // A batch truncated at t_max did fewer than a full batch's reactions but paid the
+                // full fixed cost, so its w/dt is inflated -- exclude it (unlike Gillespie).
+                if !first_after_switch && dt > 0.0 && self.continuous_time < t_max {
+                    self.switch.record(false, elapsed, dt);
+                }
             }
 
-            // As a rough guideline, we will switch to Gillespie if the next batch is
-            // expected to do less than some constant number of reactions.
-            // The main loop in batch_step currently loops over all possible reactant vectors,
-            // and certainly needs to loop over all non-passive reactions at least,
-            // so we'll use the number of reactions as a conservative baseline
-            // (that is to say, this will probably be too reticent to use Gillespie)
-            // TODO: change this check to be based on the actual walltime of the last calls to batch_step() and
-            // also possibly gillespie_steps()
+            // Decide the mode for the next iteration. HEURISTIC_PROXY uses only the original
+            // reaction-count rule; HEURISTIC_WALLCLOCK (default) starts from that rule but lets a
+            // measured wall-clock-per-continuous-time (w/dt) comparison override it once the other
+            // mode is measured decisively cheaper, probing the other mode occasionally to measure it.
             let non_passive_probability = self.non_passive_reaction_probability();
-            let rough_expected_non_passive_reactions_next_batch =
-                non_passive_probability * (self.n_including_extra_species as f64).sqrt();
-            if rough_expected_non_passive_reactions_next_batch < self.crn.reactions.len() as f64 {
-                if self.do_gillespie {
-                    self.just_started_gillespie = false;
-                } else {
-                    self.do_gillespie = true;
-                    self.just_started_gillespie = true;
-                }
-            } else {
-                if self.do_gillespie {
-                    self.do_gillespie = false;
-                    self.just_finished_gillespie = true;
-                } else {
-                    self.just_finished_gillespie = false;
-                }
-            }
             if non_passive_probability == 0.0 {
                 self.silent = true;
+            }
+            let rough_expected_non_passive_reactions_next_batch =
+                non_passive_probability * (self.n_including_extra_species as f64).sqrt();
+            let proxy_gillespie = rough_expected_non_passive_reactions_next_batch < self.switch.proxy_threshold;
+
+            if self.switch.heuristic == HEURISTIC_PROXY {
+                // Simpler heuristic: the reaction-count rule alone, no timing-based override.
+                self.set_mode(proxy_gillespie);
+            } else if self.switch.probe_remaining > 0 {
+                // In-flight probe: keep running the (non-current) probed mode so we get one
+                // representative measurement; the normal decision below then acts on it.
+                self.switch.probe_remaining -= 1;
+                let probed = self.do_gillespie;
+                self.set_mode(probed);
+            } else {
+                self.switch.iters_since_probe += 1;
+                let cur = self.do_gillespie;
+                let both_measured = self.switch.has_est(true) && self.switch.has_est(false);
+                let interval = if both_measured {
+                    WDT_PROBE_INTERVAL_COMMITTED
+                } else {
+                    WDT_PROBE_INTERVAL
+                };
+                if self.switch.has_est(cur) && self.switch.iters_since_probe >= interval {
+                    // Probe the other mode (one switch iteration, excluded from the EMA, then one
+                    // representative measurement) so its estimate is available/fresh.
+                    self.switch.iters_since_probe = 0;
+                    self.switch.probe_remaining = 1;
+                    self.set_mode(!cur);
+                } else if both_measured {
+                    // Both modes measured: follow the proxy unless the other is decisively cheaper.
+                    let non_proxy = !proxy_gillespie;
+                    let override_proxy =
+                        self.switch.wdt(non_proxy) * WDT_OVERRIDE_FACTOR < self.switch.wdt(proxy_gillespie);
+                    self.set_mode(if override_proxy { non_proxy } else { proxy_gillespie });
+                } else {
+                    // Bootstrap: follow the proxy (also measures whichever mode it runs).
+                    self.set_mode(proxy_gillespie);
+                }
             }
         }
         Ok(())
@@ -811,6 +1037,25 @@ impl SimulatorCRNMultiBatch {
     }
 }
 
+// --- Wall-clock-aware batch/Gillespie switching ---------------------------------
+// EMA smoothing factor for each mode's measured wall-clock-per-continuous-time (w/dt).
+const WDT_EMA_ALPHA: f64 = 0.3;
+// The reaction-count proxy is the default mode choice; deviate from it only when the other
+// mode's measured w/dt is at least this many times smaller. A decisive margin fixes the cases
+// the proxy gets badly wrong (the Oregonator, where Gillespie is ~60x cheaper) while leaving the
+// cases it gets right undisturbed (Dimerization, where the two modes stay within ~2x, so we keep
+// the proxy's batch choice and its published performance).
+const WDT_OVERRIDE_FACTOR: f64 = 4.0;
+// While bootstrapping (a mode not yet measured), probe the other mode this often so that it gets
+// measured at all -- the proxy may never choose it (e.g. the Oregonator at large n, where the
+// proxy always says "batch").
+const WDT_PROBE_INTERVAL: u64 = 256;
+// Once both modes are measured, re-probe only this often -- rarely, just to catch a slow regime
+// change. Frequent probing of the coarse-grained Gillespie engine (whose dt per call is large)
+// would waste continuous time in the costlier mode; this is what would otherwise slow Dimerization,
+// whose batch engine wins decisively at large n.
+const WDT_PROBE_INTERVAL_COMMITTED: u64 = 8192;
+
 // TODO: if we're using this, figure out a sensible value for it? It will only matter really
 // for CRNs whose population size fluctuates a lot.
 const K_COUNT_RATIO_THRESHOLD: f64 = 0.5;
@@ -1001,6 +1246,25 @@ fn make_batch_result(dimensions: usize, length: usize) -> NDBatchResult {
 }
 
 impl SimulatorCRNMultiBatch {
+    /// Choose the engine for the next iteration (`true` = Gillespie), maintaining the
+    /// `just_started_gillespie` / `just_finished_gillespie` transition flags exactly as the
+    /// original switching code did, so the one-time rebuild still fires on a real transition.
+    fn set_mode(&mut self, want_gillespie: bool) {
+        if want_gillespie {
+            if self.do_gillespie {
+                self.just_started_gillespie = false;
+            } else {
+                self.do_gillespie = true;
+                self.just_started_gillespie = true;
+            }
+        } else if self.do_gillespie {
+            self.do_gillespie = false;
+            self.just_finished_gillespie = true;
+        } else {
+            self.just_finished_gillespie = false;
+        }
+    }
+
     /// Run one batch of reactions, on average O(sqrt(n)) of them, some of which will typically be passive.
     /// Returns after simulating one batch, and does not necessarily run until `t_max`.
     /// Updates the urn and any relevant variables; the `SimulatorCRNMultiBatch` should be in a valid state afterward.
