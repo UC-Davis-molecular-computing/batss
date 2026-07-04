@@ -574,20 +574,7 @@ impl SimulatorCRNMultiBatch {
     /// Called when switching from Gillespie to batch mode; populates the batch config with Gillespie's current
     /// configuration.
     fn finalize_gillespie(&mut self) {
-        let mut gillespie_config: Vec<u64> = vec![0; self.q];
-        let mut species_index = 0;
-        for i in 0..self.q {
-            if i == self.crn.w {
-                continue;
-            }
-            if i == self.crn.k {
-                gillespie_config[i] = self.urn.config[i];
-                continue;
-            }
-            gillespie_config[i] = self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
-            species_index += 1;
-        }
-        self.urn.reset_config(&gillespie_config);
+        self.sync_urn_from_gillespie();
         self.reset_k_count();
     }
 
@@ -1346,14 +1333,42 @@ impl SimulatorCRNMultiBatch {
         gillespie.advance_until(time_to_run_gillespie_until);
         self.continuous_time = gillespie.get_time();
 
-        // Update fields that have changed.
-        let new_gillespie_n = self.gillespie_total_population_count();
-        let delta_n = new_gillespie_n - original_gillespie_n;
-        self.n += delta_n;
-        self.n_including_extra_species += delta_n;
+        // Sync the counts rebop just changed back into self.urn. Without this, the propensity
+        // calculated at the top of this function (and by non_passive_reaction_probability in the
+        // switching heuristic in run) is based on the stale configuration from when we entered
+        // Gillespie mode. If the propensity has dropped a lot since then (e.g. a fast species
+        // was consumed), the stale propensity makes time_to_run_gillespie so small that the
+        // simulation appears to hang, advancing continuous_time by a tiny amount per call.
+        self.sync_urn_from_gillespie();
         // We'd like to update self.discrete_batched_steps_no_passives and
         // self.discrete_batched_steps_total, but rebop does not keep track of how many reactions
         // it simulates, so at least for now those variables only count batched steps.
+    }
+
+    /// Copy the current species counts in the rebop Gillespie object into self.urn,
+    /// keeping the current count of K and setting W to 0 (W is always 0 while doing
+    /// Gillespie steps, since recycle_waste is called after every batch step).
+    /// Also updates self.n and self.n_including_extra_species to match.
+    /// While doing Gillespie steps the true configuration lives in self.gillespie, so this
+    /// must be called after each round of Gillespie steps to keep propensity calculations,
+    /// the batch/Gillespie switching heuristic, and the config exposed to Python correct.
+    fn sync_urn_from_gillespie(&mut self) {
+        let mut gillespie_config: Vec<u64> = vec![0; self.q];
+        let mut species_index = 0;
+        for i in 0..self.q {
+            if i == self.crn.w {
+                continue;
+            }
+            if i == self.crn.k {
+                gillespie_config[i] = self.urn.config[i];
+                continue;
+            }
+            gillespie_config[i] = self.gillespie.as_ref().unwrap().get_species(species_index) as u64;
+            species_index += 1;
+        }
+        self.urn.reset_config(&gillespie_config);
+        self.n_including_extra_species = self.urn.size;
+        self.n = self.n_including_extra_species - self.urn.config[self.crn.k] - self.urn.config[self.crn.w];
     }
 
     /// Helper to get the total current population in the Gillespie simulation.
