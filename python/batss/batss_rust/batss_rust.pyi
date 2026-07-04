@@ -34,18 +34,6 @@ class Simulator(ABC):
     silent: bool
     """TODO"""
 
-    discrete_batched_steps_no_nulls: int
-    """TODO"""
-
-    discrete_batched_steps_no_nulls_last_run: int
-    """TODO"""
-
-    discrete_batched_steps_total: int
-    """TODO"""
-
-    discrete_batched_steps_total_last_run: int
-    """TODO"""
-
     def run_until_silent(self) -> None:
         """TODO"""
         ...
@@ -61,6 +49,14 @@ class Simulator(ABC):
         Args:
             t_max: Maximum number of simulation steps to execute or continuous time to simulate
             max_wallclock_time: Maximum wall clock time in seconds before stopping (default: 1 hour)
+        """
+        ...
+
+    def non_passive_reaction_probability(self) -> float:
+        """
+        The probability that the next reaction is non-passive (i.e. actually changes the
+        configuration in the original CRN), computed from the current configuration's species
+        counts. Well-defined in both batch and Gillespie phases.
         """
         ...
 

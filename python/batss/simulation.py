@@ -127,29 +127,14 @@ class Simulation:
     times: list[float]
     """A list of all the corresponding times for configs."""
 
-    discrete_batched_steps_total: list[int]
+    non_passive_fractions: list[float]
     """
-    Parallel to self.times and self.configs, this is how many total steps were taken up to that time,
-    including steps that simulated passive reactions. This is a cumulative list, i.e.,
-    self.discrete_batched_steps_total[i] is the total number of steps taken up to time self.times[i].
-    """
-
-    discrete_batched_steps_total_last_run: list[int]
-    """
-    Like :data:`Simulation.discrete_batched_steps_total`, but only since the last call to 
-    :meth:`Simulation.simulator.run`.
-    """
-
-    discrete_batched_steps_no_passives: list[int]
-    """
-    Parallel to self.times and self.configs, this is how many total steps were taken up to that time,
-    NOT including steps that simulated passive reactions. Cumulative list similarly to self.discrete_batched_steps_total.
-    """
-
-    discrete_batched_steps_no_passives_last_run: list[int]
-    """
-    Like :data:`Simulation.discrete_batched_steps_total`, but only since the last call to 
-    :meth:`Simulation.simulator.run`.
+    Parallel to self.times and self.configs: the fraction of reactions that are non-passive
+    (i.e. that actually change the configuration in the original CRN) at each recorded time,
+    measured directly from that snapshot's species counts via
+    :meth:`batss_rust.BatchSimulator.non_passive_reaction_probability`. Because it depends only on
+    the current configuration, it is well-defined in both batch and Gillespie phases (a running
+    tally of simulated reactions was not, since Gillespie steps do not update such a tally).
     """
 
     steps_per_time_unit: float
@@ -301,10 +286,7 @@ class Simulation:
                     sim = Simulation(init_config, rule, threshold=20)
 
         """
-        self.discrete_batched_steps_total = []
-        self.discrete_batched_steps_total_last_run = []
-        self.discrete_batched_steps_no_passives = []
-        self.discrete_batched_steps_no_passives_last_run = []
+        self.non_passive_fractions = []
         self.simulator_method = simulator_method
         self.seed = seed
         self.rng = np.random.default_rng(seed)
@@ -853,13 +835,6 @@ class Simulation:
                     self._history.index.name = f"time ({n} interactions)"
         return self._history
 
-    @property
-    def passive_probability(self) -> float:
-        """The probability the next interaction is passive."""
-        self.simulator.get_enabled_reactions()
-        n = self.simulator.n
-        return 1 - self.simulator.get_total_propensity() / (n * (n - 1) / 2)
-
     def times_in_units(self, times: Iterable[float]) -> Iterable[Any]:
         """If :data:`Simulation.time_units` is defined, convert time list to appropriate units."""
         if self.time_units is not None:
@@ -877,13 +852,10 @@ class Simulation:
         self.configs.append(np.array(self.simulator.config))
         self.times.append(self.time)
 
-        self.discrete_batched_steps_total.append(self.simulator.discrete_batched_steps_total)
-        self.discrete_batched_steps_no_passives.append(self.simulator.discrete_batched_steps_no_passives)
-
-        self.discrete_batched_steps_total_last_run.append(self.simulator.discrete_batched_steps_total_last_run)
-        self.discrete_batched_steps_no_passives_last_run.append(
-            self.simulator.discrete_batched_steps_no_passives_last_run
-        )
+        # Record the non-passive reaction fraction from the current configuration (see the
+        # non_passive_fractions field). This is measured directly, not tallied during batch steps,
+        # so it stays correct across batch/Gillespie mode switches.
+        self.non_passive_fractions.append(self.simulator.non_passive_reaction_probability())
 
     def set_snapshot_time(self, time: float) -> None:
         """Updates all snapshots to the nearest recorded configuration to a specified time.

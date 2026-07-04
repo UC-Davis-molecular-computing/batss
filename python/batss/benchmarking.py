@@ -7,7 +7,7 @@ Define a CRN once as a :class:`CRNSpec`, then hand it to
 * :func:`benchmark_runtimes` + :func:`plot_runtimes` to measure how run time
   scales with population size ``n``, batss vs rebop, and
 * :func:`plot_trajectory` to plot species counts over time from a single batss
-  run, optionally overlaying the fraction of passive (null) reactions on a
+  run, optionally overlaying the fraction of non-passive (real) reactions on a
   dashed second y-axis.
 
 The runtime benchmark caches per-(backend, n) measurements to JSON so reruns
@@ -237,18 +237,7 @@ def plot_runtimes(
     return ax
 
 
-# --- plot 2: trajectory + passive-reaction fraction ---------------------------
-
-
-def _non_passive_fractions(sim: Simulation) -> tuple[list[float], list[float]]:
-    # Intervals with zero total steps (always the first and last, sometimes
-    # others at small n) would divide by zero — drop them.
-    total = np.array(sim.discrete_batched_steps_total_last_run)
-    non_passive = np.array(sim.discrete_batched_steps_no_passives_last_run)
-    all_times = sim.history.index.tolist()
-    times = [t for t, tot in zip(all_times, total) if tot > 0]
-    fractions = [m / tot for tot, m in zip(total, non_passive) if tot > 0]
-    return times, fractions
+# --- plot 2: trajectory + non-passive-reaction fraction -----------------------
 
 
 def plot_trajectory(
@@ -323,11 +312,12 @@ def plot_trajectory(
             "backend='batss' (rebop has no passive reactions); skipping it."
         )
     if with_nonpassive and sim is not None:
-        times_p, fractions = _non_passive_fractions(sim)
+        # The non-passive reaction fraction at each recorded time, measured directly from that
+        # snapshot's configuration (parallel to sim.history.index).
         ax2 = ax.twinx()
         ax2.plot(
-            times_p,
-            fractions,
+            sim.history.index,
+            sim.non_passive_fractions,
             label="non-passive",
             linestyle="--",
             color="#d62728",

@@ -249,13 +249,10 @@ def plot_dimerization_crn_ppsim_with_passive(pop_exponent: int, seed: int) -> No
 
     sim.run(2, 0.01)
 
-    # total steps starts with 0 (and for some reason ends with 0, I don't get that),
-    # so we slice it to remove the first and last element to avoid dividing by zero.
-    total_steps = np.array(sim.discrete_batched_steps_total_last_run)[1:-1]
-    non_passive_steps = np.array(sim.discrete_batched_steps_no_passives_last_run)[1:-1]
-    passive_steps = total_steps - non_passive_steps
-    passive_fractions = passive_steps / total_steps
-    times = sim.history.index.tolist()[1:-1]  # make same length as passive_fractions
+    # Passive reaction fraction at each recorded time, measured directly from that snapshot's
+    # configuration (correct across batch/Gillespie switches, unlike a batch-step tally).
+    passive_fractions = 1 - np.array(sim.non_passive_fractions)
+    times = sim.history.index.tolist()
 
     f, ax = plt.subplots(figsize=figsize)
 

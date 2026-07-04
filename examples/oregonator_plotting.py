@@ -127,14 +127,10 @@ def plot_passive_reactions(pop_exponent: int, seed: int) -> None:
     print(f"running batss with n = 10^{pop_exponent}")
     sim.run(end_time, end_time / num_samples)
 
-    # total steps starts with 0 (and for some reason ends with 0, I don't get that),
-    # so we slice it to remove the first and last element to avoid dividing by zero.
-    total_steps = np.array(sim.discrete_batched_steps_total_last_run)[1:-1]
-    non_passive_steps = np.array(sim.discrete_batched_steps_no_passives_last_run)[1:-1]
-    passive_steps = total_steps - non_passive_steps
-    passive_fractions = passive_steps / total_steps
-    non_passive_fractions = non_passive_steps / total_steps
-    times = sim.history.index.tolist()[1:-1]  # make same length as passive_fractions
+    # Non-passive reaction fraction at each recorded time, measured directly from that snapshot's
+    # configuration (correct across batch/Gillespie switches, unlike a batch-step tally).
+    non_passive_fractions = np.array(sim.non_passive_fractions)
+    times = sim.history.index.tolist()
 
     f, ax = plt.subplots(figsize=figsize)
 

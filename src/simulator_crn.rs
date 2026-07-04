@@ -397,31 +397,6 @@ pub struct BatchSimulator {
     #[pyo3(get, set)]
     pub continuous_time: f64,
 
-    /// The current number of elapsed interaction steps that actually simulated something in
-    /// the original CRN, rather than being a passive reaction,
-    /// since the Simulator was created.
-    /// WARNING: does not count steps from reactions simulated using Gillespie.
-    #[pyo3(get, set)]
-    pub discrete_batched_steps_no_passives: u64,
-
-    /// The current number of elapsed interaction steps in this CRN, including passive reactions,
-    /// since the Simulator was created.
-    /// WARNING: does not count steps from reactions simulated using Gillespie.
-    #[pyo3(get, set)]
-    pub discrete_batched_steps_total: u64,
-
-    /// The total number of states (length of urn.config),
-    /// in the most recent call to run.
-    /// WARNING: does not count steps from reactions simulated using Gillespie.
-    #[pyo3(get, set)]
-    pub discrete_batched_steps_no_passives_last_run: u64,
-
-    /// The number of elapsed interaction steps in this CRN, including passive reactions,
-    /// in the most recent call to run.
-    /// WARNING: does not count steps from reactions simulated using Gillespie.
-    #[pyo3(get, set)]
-    pub discrete_batched_steps_total_last_run: u64,
-
     /// The total number of states (length of urn.config).
     /// Includes the auxiliary species K and W.
     pub q: usize,
@@ -551,10 +526,6 @@ impl BatchSimulator {
             .fold(0, |acc, x| acc.max(x));
 
         let continuous_time = 0.0;
-        let discrete_batched_steps_no_passives = 0;
-        let discrete_batched_steps_total = 0;
-        let discrete_batched_steps_no_passives_last_run = 0;
-        let discrete_batched_steps_total_last_run = 0;
         let rng = if let Some(s) = seed {
             SmallRng::seed_from_u64(s)
         } else {
@@ -607,10 +578,6 @@ impl BatchSimulator {
             n,
             n_including_extra_species,
             continuous_time,
-            discrete_batched_steps_no_passives,
-            discrete_batched_steps_total,
-            discrete_batched_steps_no_passives_last_run,
-            discrete_batched_steps_total_last_run,
             q,
             random_transitions,
             random_outputs,
@@ -676,8 +643,6 @@ impl BatchSimulator {
     /// Run the simulation for a specified number of steps or until max time is reached
     #[pyo3(signature = (t_max, max_wallclock_time=3600.0))]
     pub fn run(&mut self, t_max: f64, max_wallclock_time: f64) -> PyResult<()> {
-        self.discrete_batched_steps_no_passives_last_run = 0;
-        self.discrete_batched_steps_total_last_run = 0;
         if self.silent {
             return Err(PyValueError::new_err("Simulation is silent; cannot run."));
         }
@@ -897,10 +862,6 @@ impl BatchSimulator {
         }
         self.n_including_extra_species = self.n + self.urn.config[self.crn.k];
         self.continuous_time = t;
-        self.discrete_batched_steps_no_passives = 0;
-        self.discrete_batched_steps_total = 0;
-        self.discrete_batched_steps_no_passives_last_run = 0;
-        self.discrete_batched_steps_total_last_run = 0;
         self.silent = self.n == 0;
         Ok(())
     }
@@ -1329,7 +1290,6 @@ impl BatchSimulator {
         self.array_sums.sample_batch_result(rxns_before_coll, &mut self.urn);
         flame::end("sample batch");
 
-        let initial_t_including_passives = self.discrete_batched_steps_total;
         flame::start("process batch");
         let mut done = false;
         let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
@@ -1369,9 +1329,6 @@ impl BatchSimulator {
                 flame::end("passive reaction");
             } else {
                 flame::start("non-passive reaction");
-                // We'll add this for now, then subtract off the probabilistically passive reactions later.
-                self.discrete_batched_steps_no_passives += quantity;
-                self.discrete_batched_steps_no_passives_last_run += quantity;
                 let mut probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
                 if non_passive_probability_sum < 1.0 {
@@ -1405,8 +1362,6 @@ impl BatchSimulator {
                     for reactant in reactants {
                         self.updated_counts.add_to_entry(reactant, passive_count as i64);
                     }
-                    self.discrete_batched_steps_no_passives -= passive_count;
-                    self.discrete_batched_steps_no_passives_last_run -= passive_count;
                 }
                 flame::end("non-passive reaction");
             }
@@ -1499,8 +1454,6 @@ impl BatchSimulator {
                 }
                 self.updated_counts.add_to_entry(self.crn.w, (self.crn.g) as i64);
             } else {
-                self.discrete_batched_steps_no_passives += 1;
-                self.discrete_batched_steps_no_passives_last_run += 1;
                 let mut probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let non_passive_probability_sum: f64 = probabilities.iter().sum();
                 if non_passive_probability_sum < 1.0 {
@@ -1529,8 +1482,6 @@ impl BatchSimulator {
                     for reactant in collision {
                         self.updated_counts.add_to_entry(reactant, passive_count as i64);
                     }
-                    self.discrete_batched_steps_no_passives -= passive_count;
-                    self.discrete_batched_steps_no_passives_last_run -= passive_count;
                 }
             }
             assert_eq!(
@@ -1538,21 +1489,19 @@ impl BatchSimulator {
                 (self.crn.o + self.crn.g) as u64 - num_resampled,
                 "Collision failed to add exactly g things to updated_counts"
             );
-            self.discrete_batched_steps_total += 1;
-            self.discrete_batched_steps_total_last_run += 1;
         }
         flame::end("sample collision");
 
-        // TODO move this line to a more sensible place
-        self.discrete_batched_steps_total += rxns_before_coll;
-        self.discrete_batched_steps_total_last_run += rxns_before_coll;
+        // Total reactions simulated in this batch: the reactions before the collision, plus the
+        // collision reaction itself when one occurred.
+        let reactions_this_batch = rxns_before_coll + if do_collision { 1 } else { 0 };
 
         self.urn.add_vector(&self.updated_counts.config);
         self.urn.sort();
         // Check that we added the right number of things to the urn.
         assert_eq!(
             self.urn.size - self.n_including_extra_species,
-            (self.discrete_batched_steps_total - initial_t_including_passives) * self.crn.g as u64,
+            reactions_this_batch * self.crn.g as u64,
             "Inconsistency between number of reactions simulated and population size change."
         );
         assert_eq!(
@@ -1604,9 +1553,6 @@ impl BatchSimulator {
         // was consumed), the stale propensity makes time_to_run_gillespie so small that the
         // simulation appears to hang, advancing continuous_time by a tiny amount per call.
         self.sync_urn_from_gillespie();
-        // We'd like to update self.discrete_batched_steps_no_passives and
-        // self.discrete_batched_steps_total, but rebop does not keep track of how many reactions
-        // it simulates, so at least for now those variables only count batched steps.
     }
 
     /// Copy the current species counts in the rebop Gillespie object into self.urn,
