@@ -255,6 +255,7 @@ def plot_trajectory(
     with_nonpassive: bool = True,
     figsize: tuple[float, float] = (8, 4),
     ax: Axes | None = None,
+    loc: str = "best",
 ) -> Axes:
     """Simulate ``spec`` with ``backend`` at population size ``n`` and plot counts vs time.
 
@@ -327,7 +328,7 @@ def plot_trajectory(
         handles += h2
         labels += l2
 
-    ax.legend(handles, labels, loc="lower right")
+    ax.legend(handles, labels, loc=loc)
     ax.set_title(f"{spec.name}: {backend}, n={n_str}")
 
     out_path = Path(data_dir) / f"{spec.name}_trajectory_{backend}_n{n}_t{end_time}.pdf"
