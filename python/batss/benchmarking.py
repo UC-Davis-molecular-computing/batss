@@ -143,6 +143,7 @@ def benchmark_runtimes(
     seed: int = 1,
     overwrite: bool = False,
     heuristic: bool = False,
+    show_progress: bool = True,
 ) -> None:
     """Time one run to ``spec.benchmark_end_time`` for each (backend, n) and cache to JSON.
 
@@ -150,18 +151,23 @@ def benchmark_runtimes(
     The first timed run for each backend is preceded by a warm-up run whose time
     is discarded (rebop's first call in a process is notably slower than
     subsequent ones).
+
+    ``show_progress`` (default True) toggles batss's live progress bar during each
+    run (the ``timer`` snapshot in :meth:`Simulation.run`). It has no effect on the
+    rebop backend, which has no such bar. The bar's display overhead is included in
+    the timed measurement, so set it False for the least-perturbed timings.
     """
     end_time = spec.benchmark_end_time
     data_dir = Path(data_dir)
     for backend in backends:
         path = _runtime_path(data_dir, spec, backend, end_time, proxy=heuristic and backend == "batss")
         data = {} if overwrite else _load_runtime_json(path)
-        print(f"benchmarking {spec.name} on {backend} -> {path}")
+        print(f"benchmarking {spec.name} on {backend} -> {path}", flush=True)
 
         warmed_up = False
         for n in pop_sizes:
             if n in data:
-                print(f"  n={n:,}: cached {data[n]:.4g}s, skipping")
+                print(f"  n={n:,}: cached {data[n]:.4g}s, skipping", flush=True)
                 continue
 
             if backend == "batss":
@@ -169,7 +175,15 @@ def benchmark_runtimes(
                 sim.simulator.heuristic = 1 if heuristic else 0
 
                 def run() -> None:
-                    sim.run(end_time, end_time, timer=False)
+                    # A progress bar can only advance when the Python run loop regains control,
+                    # which happens once per stopping_interval. With the whole run in a single
+                    # simulator.run() call the bar would sit at 0% until it finished, so when
+                    # showing progress we split the run into ~100 checkpoints. This records no
+                    # extra history (history_interval is still the full end_time); it only yields
+                    # to refresh the bar, at a small timing cost (hence show_progress=False for
+                    # the cleanest timings).
+                    stopping = end_time / 100 if show_progress else end_time
+                    sim.run(end_time, end_time, stopping_interval=stopping, timer=show_progress)
             elif backend == "rebop":
                 crn, inits = _rebop_crn(spec, n)
 
@@ -185,7 +199,7 @@ def benchmark_runtimes(
             t0 = time.perf_counter()
             run()
             elapsed = time.perf_counter() - t0
-            print(f"  n={n:,}: {elapsed:.4g}s")
+            print(f"  n={n:,}: {elapsed:.4g}s", flush=True)
             data[n] = elapsed
             _save_runtime_json(path, data)
 
