@@ -230,6 +230,42 @@ impl UniformCRN {
         return correction_factor;
     }
 
+    /// The count of K at which the two branches of kmax(k0) meet. As K grows, a padded reaction's
+    /// adjusted rate (`rate * symmetry / k0`, for a reaction carrying one K) falls, while a genuine
+    /// order-o reaction's adjusted rate (`rate * symmetry`) is constant. `kmax` rides the falling
+    /// branch, then flattens onto that constant floor; the handoff is the crossover, returned here as
+    /// `A_pad / C_flat` where
+    ///   C_flat = max over reactions with no K of (rate * symmetry), and
+    ///   A_pad  = max over reactions with exactly one K of (rate * symmetry).
+    /// It depends only on the (volume-adjusted) rate constants and symmetry, not on the configuration.
+    /// Returns +inf when there is no padded reaction or no order-o reaction, so the crossover does not
+    /// bind. Assumes the padded branch is governed by order-(o-1) reactions (one K, delta0 = 1), which
+    /// holds for o = 2 (all our benchmark CRNs); reactions carrying >= 2 K flatten at smaller K and do
+    /// not govern the final handoff, so they are skipped.
+    fn crossover_k_count(&self) -> f64 {
+        let mut c_flat = 0.0_f64;
+        let mut a_pad = 0.0_f64;
+        for reaction in &self.reactions {
+            let reactants = &reaction.reactants;
+            let k_multiplicity = reactants.iter().filter(|&s| *s == self.k).count();
+            let symmetry_degree = Self::symmetry_degree(reactants) as f64;
+            let mut total_rate_constant = 0.0;
+            for output in &reaction.products_and_rate_constants {
+                total_rate_constant += output.1;
+            }
+            let numerator = total_rate_constant * symmetry_degree;
+            match k_multiplicity {
+                0 => c_flat = c_flat.max(numerator),
+                1 => a_pad = a_pad.max(numerator),
+                _ => {}
+            }
+        }
+        if a_pad <= 0.0 || c_flat <= 0.0 {
+            return f64::INFINITY;
+        }
+        a_pad / c_flat
+    }
+
     /// Determine the degree of symmetry of a reaction, i.e., for any given ordering of its reactants,
     /// the number of reorderings that are redundant. Obtained as the product of the factorial of
     /// the count of each reactant.
@@ -475,6 +511,21 @@ pub struct BatchSimulator {
 
     /// A module containing code for calling python-implemented collision sampling.
     pub python_module: Py<PyModule>,
+
+    /// The crossover K count `C_padded / C_flat`, cached at construction: it is config-independent
+    /// (rate constants and volume only), so `k_reset_target` reads it instead of recomputing (which
+    /// would allocate) on every batch. See `UniformCRN::crossover_k_count`.
+    pub crossover_k0: f64,
+
+    /// Experiment override for sweeping K: if > 0, `reset_k_count` targets `round(k0_manual_multiplier
+    /// * n)` instead of the optimal `min(2n, crossover)`. Used to empirically locate the batch-count
+    /// optimum over K. 0 (default) disables the override.
+    #[pyo3(get, set)]
+    pub k0_manual_multiplier: f64,
+
+    /// Number of K resets performed in run()'s batch branch (observability; used to compare policies).
+    #[pyo3(get)]
+    pub k_resets: u64,
 }
 
 #[pymethods]
@@ -573,6 +624,7 @@ impl BatchSimulator {
         // The proxy heuristic's default threshold is the reaction count (the original rule).
         let switch = SwitchState::new(crn.reactions.len() as f64);
 
+        let crossover_k0 = crn.crossover_k_count();
         let mut simulator = BatchSimulator {
             crn,
             n,
@@ -595,6 +647,9 @@ impl BatchSimulator {
             silent,
             switch,
             python_module,
+            crossover_k0,
+            k0_manual_multiplier: 0.0,
+            k_resets: 0,
             // gillespie_threshold,
             // coll_table,
             // coll_table_r_values,
@@ -694,9 +749,18 @@ impl BatchSimulator {
                 let s = Instant::now();
                 self.batch_step(t_max);
                 let current_k_count = self.urn.config[self.crn.k];
-                if (current_k_count.min(self.n) as f64) / (current_k_count.max(self.n) as f64) < K_COUNT_RATIO_THRESHOLD
-                {
+                let target_k_count = self.k_reset_target();
+                // Rebuild K (costly: reconstructs the transition arrays) only when the count has drifted
+                // more than a factor K_RESET_BAND_FACTOR from its target min(2n, crossover). Testing this
+                // every batch is cheap; the band avoids rebuilding on every small change in n while K
+                // tracks the 2n branch, and once K reaches the config-independent crossover it stops
+                // firing. The band also smooths the boundary: as n falls into the crossover>2n regime, K
+                // is not corrected until n has dropped a factor K_RESET_BAND_FACTOR past crossover/2.
+                let lo = current_k_count.min(target_k_count).max(1) as f64;
+                let hi = current_k_count.max(target_k_count) as f64;
+                if hi > K_RESET_BAND_FACTOR * lo {
                     self.reset_k_count();
+                    self.k_resets += 1;
                 }
                 self.recycle_waste();
                 let elapsed = s.elapsed().as_secs_f64();
@@ -984,7 +1048,14 @@ impl BatchSimulator {
         }
         return answer;
     }
-    /// Calculate the probability that a reaction in the next batch will be non-passive.
+    /// The probability that the next sampled reaction is non-passive (actually changes the original
+    /// CRN's configuration): `P_real / P_total`, where `P_total = calculate_total_propensity(true)` uses
+    /// `n_including_extra_species`, the current population including the filler species K. It is a
+    /// function of the current configuration -- the full urn state including the count of K, not the
+    /// original species counts alone. Since K drifts over the run (restored to n only when K/n leaves
+    /// [0.5, 2], and frozen during Gillespie phases), two snapshots with the same original-species
+    /// counts but different K report different values. Used to record `Simulation.non_passive_fractions`
+    /// and by the switching heuristic in `run`.
     pub fn non_passive_reaction_probability(&self) -> f64 {
         let total_propensity_not_including_passive_reactions = self.calculate_total_propensity(false);
         let total_propensity_including_passive_reactions = self.calculate_total_propensity(true);
@@ -995,6 +1066,30 @@ impl BatchSimulator {
             total_propensity_not_including_passive_reactions
         );
         return total_propensity_not_including_passive_reactions / total_propensity_including_passive_reactions;
+    }
+
+    // Observability for the optimal-K analysis: expose the propensity components, CRN constants, the
+    // config-independent crossover, and the current reset target.
+    pub fn debug_p_nonpassive(&self) -> f64 {
+        self.calculate_total_propensity(false)
+    }
+    pub fn debug_p_total(&self) -> f64 {
+        self.calculate_total_propensity(true)
+    }
+    pub fn debug_kmax(&self) -> f64 {
+        self.crn.continuous_time_correction_factor
+    }
+    pub fn debug_o(&self) -> usize {
+        self.crn.o
+    }
+    pub fn debug_g(&self) -> usize {
+        self.crn.g
+    }
+    pub fn debug_crossover(&self) -> f64 {
+        self.crossover_k0
+    }
+    pub fn debug_k_reset_target(&self) -> u64 {
+        self.k_reset_target()
     }
 }
 
@@ -1017,15 +1112,12 @@ const WDT_PROBE_INTERVAL: u64 = 256;
 // whose batch engine wins decisively at large n.
 const WDT_PROBE_INTERVAL_COMMITTED: u64 = 8192;
 
-// TODO: if we're using this, figure out a sensible value for it? It will only matter really
-// for CRNs whose population size fluctuates a lot.
-const K_COUNT_RATIO_THRESHOLD: f64 = 0.5;
-// DD: I'm confused about a phenomenon; if this is 0.5, the fraction of passive reactions with LV
-// (with rate constant 1.5 for the F+R-->2F reaction) starts around 0.4 and drops, then increases
-// hovering closer to 0.5. However, if we set this to 0.33, then it starts around 0.4 and *increases*;
-// This is just the way we decide when to reset K, so I don't understand why setting it differently
-// would change the behavior of the simulation *before* the first switch, i.e., why the fraction of
-// passive reactions goes up in one case and down in the other.
+// Rebuild K only once it has drifted more than this multiplicative factor from its target
+// min(2n, crossover). Smaller = K tracks the optimum more tightly (smaller jumps in the non-passive
+// fraction each time it resets) but rebuilds more often; larger = fewer rebuilds, bigger jumps.
+// (This is why changing it visibly changes the non-passive-fraction trace: each reset is a jump back
+// to the optimal K, and this factor sets how far K drifts -- and how big the jump is -- between resets.)
+const K_RESET_BAND_FACTOR: f64 = 1.1;
 
 fn relative_error(a: f64, b: f64) -> f64 {
     if a == 0.0 {
@@ -1635,12 +1727,10 @@ impl BatchSimulator {
     /// We will try to choose a value for the count of K that maximizes the expected amount
     /// of progress we make in simulating the original CRN.
     fn reset_k_count(&mut self) {
-        // TODO: maybe do something more complicated than this to actually be efficient.
-        // For now, it looks like construct_transition_arrays is a bottleneck, so we're only going
-        // to change the count of K if the population size has significantly changed, or
-        // we're constructing them for the first time or resetting
+        // construct_transition_arrays is the bottleneck here, so run()'s band rule calls this only
+        // when the count of K has drifted significantly from its target (or on first construction).
         let current_k_count = self.urn.config[self.crn.k];
-        let target_k_count = self.n;
+        let target_k_count = self.k_reset_target();
         let delta_k = target_k_count as i64 - current_k_count as i64;
         assert!(self.n_including_extra_species as i64 + delta_k >= 0);
         self.n_including_extra_species = (self.n_including_extra_species as i64 + delta_k) as u64;
@@ -1650,6 +1740,29 @@ impl BatchSimulator {
             self.random_outputs,
             self.transition_probabilities,
         ) = self.crn.construct_transition_arrays(target_k_count);
+    }
+
+    /// The count of K that `reset_k_count` aims for: the throughput-optimal `min(2n, crossover)`
+    /// (generally `min(n/(o-1.5), crossover)`). This maximizes E[l]*p, the expected non-passive
+    /// reactions accomplished per (costly) batch: E[l] ~ c*sqrt(N) and p = P_real / (kmax * (N choose
+    /// o)) with P_real independent of K, so minimizing the batch count means minimizing
+    /// kmax(k0)*N^(o-1/2). kmax falls as 1/k0 (a padded reaction is the bottleneck) until it flattens
+    /// onto the config-independent `crossover`; the objective decreases up to the interior optimum
+    /// `n/(o-1.5)` (= 2n when o=2), then increases -- so the optimum is that interior value, capped at
+    /// the crossover. `k0_manual_multiplier > 0` overrides this with `round(mult * n)` for K sweeps.
+    fn k_reset_target(&self) -> u64 {
+        if self.k0_manual_multiplier > 0.0 {
+            return ((self.n as f64) * self.k0_manual_multiplier).round().max(1.0) as u64;
+        }
+        let o = self.crn.o as f64;
+        if o >= 2.0 {
+            let interior = (self.n as f64) / (o - 1.5);
+            let target = interior.min(self.crossover_k0);
+            if target.is_finite() && target >= 1.0 {
+                return target.round() as u64;
+            }
+        }
+        self.n.max(1) // degenerate o < 2: no order-o reaction to pad against, so no crossover
     }
 
     /// Get rid of W from self.urn.

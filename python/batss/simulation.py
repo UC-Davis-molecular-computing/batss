@@ -130,11 +130,14 @@ class Simulation:
     non_passive_fractions: list[float]
     """
     Parallel to self.times and self.configs: the fraction of reactions that are non-passive
-    (i.e. that actually change the configuration in the original CRN) at each recorded time,
-    measured directly from that snapshot's species counts via
-    :meth:`batss_rust.BatchSimulator.non_passive_reaction_probability`. Because it depends only on
-    the current configuration, it is well-defined in both batch and Gillespie phases (a running
-    tally of simulated reactions was not, since Gillespie steps do not update such a tally).
+    (i.e. that actually change the configuration in the original CRN) at each recorded time, from
+    :meth:`batss_rust.BatchSimulator.non_passive_reaction_probability`. It depends only on the current
+    configuration -- but that means the full simulator state, INCLUDING the count of the filler species
+    K, not the original species counts alone. Because K drifts over the run (restored to n only when
+    K/n leaves [0.5, 2], and frozen during Gillespie phases), two snapshots with the same
+    original-species counts but different K report different values. Being configuration-based, it is
+    well-defined in both batch and Gillespie phases (a running tally of simulated reactions was not,
+    since Gillespie steps do not update such a tally).
     """
 
     steps_per_time_unit: float
@@ -146,7 +149,7 @@ class Simulation:
     
     For options see https://pandas.pydata.org/docs/reference/api/pandas.to_timedelta.html
     """
-    continuous_time: bool
+    continuous_time: bool | None
     """
     Whether continuous time is used. 
     The regular discrete time model considers :data:`Simulation.steps_per_time_unit` steps to be 1 unit of time.
@@ -193,7 +196,7 @@ class Simulation:
         transition_order: str = "symmetric",
         seed: int | None = None,
         volume: float | None = None,
-        continuous_time: bool = False,
+        continuous_time: bool | None = None,
         time_units: str | None = None,
         crn: CRN | None = None,
         **kwargs,
@@ -261,8 +264,8 @@ class Simulation:
                 the parameter volume can be passed in here. Defaults to None.
                 If None, the volume will be assumed to be the population size n.
 
-            continuous_time: Whether continuous time is used. Defaults to False.
-                If a CRN as a list of reactions is passed in, this will be set to True.
+            continuous_time: Whether continuous time is used. Defaults to None, meaning it is True for CRNs
+                and False for population protcols.
 
             time_units: An optional string given the units that time is in. Defaults to None.
                 This must be a valid string to pass as unit to pandas.to_timedelta.
@@ -310,8 +313,9 @@ class Simulation:
             rule, rate_max = reactions_to_dict(rule, self.n, volume)  # type: ignore
             transition_order = "asymmetric"
             self.steps_per_time_unit *= rate_max
-            # Default to continuous time for lists of reactions
-            self.continuous_time = True
+            # Default to continuous time for lists of reactions if not specified by user
+            if continuous_time is None:
+                self.continuous_time = True
 
         self._rule = rule
         self._rule_kwargs = kwargs
@@ -852,9 +856,9 @@ class Simulation:
         self.configs.append(np.array(self.simulator.config))
         self.times.append(self.time)
 
-        # Record the non-passive reaction fraction from the current configuration (see the
-        # non_passive_fractions field). This is measured directly, not tallied during batch steps,
-        # so it stays correct across batch/Gillespie mode switches.
+        # Record the non-passive reaction fraction (see the non_passive_fractions field). Computed from
+        # the current configuration (which includes the filler count K), not tallied during batch steps,
+        # so it stays well-defined across batch/Gillespie mode switches.
         self.non_passive_fractions.append(self.simulator.non_passive_reaction_probability())
 
     def set_snapshot_time(self, time: float) -> None:

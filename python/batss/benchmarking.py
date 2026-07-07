@@ -17,6 +17,7 @@ skip work that's already cached.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,6 +113,20 @@ def _rebop_crn(spec: CRNSpec, n: int) -> tuple[rb.Gillespie, dict[str, int]]:
     return crn, inits
 
 
+def _pow10_exponent(n: int) -> int | None:
+    """Return ``k`` if ``n == 10**k`` for some integer ``k >= 0``, else ``None``."""
+    if n <= 0:
+        return None
+    exp = int(round(np.log10(n)))
+    return exp if exp >= 0 and 10**exp == n else None
+
+
+def _format_pop_size(n: int) -> str:
+    """Render ``n`` as ``'10^k'`` when it is a power of ten, else comma-grouped (``'1,000,000'``)."""
+    exp = _pow10_exponent(n)
+    return f"10^{exp}" if exp is not None else f"{n:,}"
+
+
 # --- plot 1: runtime vs population size ---------------------------------------
 
 
@@ -131,8 +146,31 @@ def _load_runtime_json(path: Path) -> dict[int, float]:
 
 def _save_runtime_json(path: Path, data: dict[int, float]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        json.dump([[n, t] for n, t in sorted(data.items())], f, indent=4)
+    payload = json.dumps([[n, t] for n, t in sorted(data.items())], indent=4)
+    # Write to a sibling temp file and atomically replace the target. This avoids the
+    # window where a cloud-sync client (this repo lives under Dropbox) or antivirus grabs
+    # the file mid-write, which on Windows surfaces intermittently as an OSError on open()
+    # or replace() (e.g. [Errno 22] Invalid argument, or "os error 32"). Retry a few times
+    # with a short backoff so a transient lock doesn't discard a measurement that may have
+    # taken tens of seconds to compute. The spaces/non-ASCII in the filename are NOT the
+    # cause -- such names open fine; it is the concurrent-access race that fails.
+    tmp = path.with_name(path.name + ".tmp")
+    last_err: OSError | None = None
+    for attempt in range(5):
+        try:
+            with tmp.open("w") as f:
+                f.write(payload)
+            os.replace(tmp, path)
+            return
+        except OSError as err:
+            last_err = err
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            time.sleep(0.2 * (attempt + 1))
+    assert last_err is not None
+    raise last_err
 
 
 def benchmark_runtimes(
@@ -159,6 +197,10 @@ def benchmark_runtimes(
     """
     end_time = spec.benchmark_end_time
     data_dir = Path(data_dir)
+    # Materialize pop_sizes (it is iterated once per backend, plus once more here) and pad every
+    # "n=..." label to a common width so the reported times line up in a column.
+    pop_sizes = list(pop_sizes)
+    label_width = max((len(_format_pop_size(n)) for n in pop_sizes), default=0)
     for backend in backends:
         path = _runtime_path(data_dir, spec, backend, end_time, proxy=heuristic and backend == "batss")
         data = {} if overwrite else _load_runtime_json(path)
@@ -166,8 +208,9 @@ def benchmark_runtimes(
 
         warmed_up = False
         for n in pop_sizes:
+            label = f"n={_format_pop_size(n):<{label_width}}"
             if n in data:
-                print(f"  n={n:,}: cached {data[n]:.4g}s, skipping", flush=True)
+                print(f"  {label}: cached {data[n]:.4g}s, skipping", flush=True)
                 continue
 
             if backend == "batss":
@@ -199,7 +242,7 @@ def benchmark_runtimes(
             t0 = time.perf_counter()
             run()
             elapsed = time.perf_counter() - t0
-            print(f"  n={n:,}: {elapsed:.4g}s", flush=True)
+            print(f"  {label}: {elapsed:.4g}s", flush=True)
             data[n] = elapsed
             _save_runtime_json(path, data)
 
@@ -263,7 +306,7 @@ def plot_trajectory(
     seed: int = 1,
     num_samples: int = 1000,
     species: list[str] | None = None,
-    with_nonpassive: bool = True,
+    show_non_passive: bool = False,
     figsize: tuple[float, float] = (8, 4),
     ax: Axes | None = None,
     loc: str = "best",
@@ -274,11 +317,14 @@ def plot_trajectory(
     ``backend`` is either ``"batss"`` (the default) or ``"rebop"``.
 
     The count y-axis starts at 0 (so the x-axis sits at y=0). When
-    ``with_nonpassive=True`` and ``backend == "batss"``, the fraction of
+    ``show_non_passive=True`` and ``backend == "batss"``, the fraction of
     non-passive (real) reactions is drawn as a dashed line on a second y-axis
-    (range [0, 1]) so it's visually distinct from the count curves. rebop has
-    no notion of passive reactions, so that line is omitted (with a printed
-    note) for that backend.
+    (range [0, 1]). This also forces the simulator into pure batching mode (it
+    never switches to Gillespie): the non-passive fraction is a batch-algorithm
+    quantity -- Gillespie simulates only real reactions, so during a Gillespie
+    phase the value would reflect a frozen filler count K rather than active
+    batching. rebop has no notion of passive reactions, so that line is omitted
+    (with a printed note) for that backend.
 
     ``species`` is a list of species-name strings to plot; defaults to the
     species named in ``spec.rxns``.
@@ -290,8 +336,8 @@ def plot_trajectory(
         raise ValueError(f"unknown backend: {backend!r}")
 
     # write n as $10^e$ if n is a power of 10, otherwise with commas
-    exp = int(round(np.log10(n))) if n > 0 else -1
-    n_str = f"$10^{{{exp}}}$" if exp >= 0 and 10**exp == n else f"{n:,}"
+    exp = _pow10_exponent(n)
+    n_str = f"$10^{{{exp}}}$" if exp is not None else f"{n:,}"
 
     species_to_plot = species if species is not None else _spec_species_names(spec)
 
@@ -299,7 +345,14 @@ def plot_trajectory(
     sim: Simulation | None = None
     if backend == "batss":
         sim = _batss_sim(spec, n, seed)
-        sim.simulator.heuristic = 1 if heuristic else 0  # must be set BEFORE run(), not after
+        if show_non_passive:
+            # Force pure batching mode so the non-passive fraction is measured where it is meaningful.
+            # The proxy heuristic with threshold 0 never switches to Gillespie: it would require a
+            # batch's expected non-passive reaction count to fall below 0, and it is always >= 0.
+            sim.simulator.heuristic = 1
+            sim.simulator.proxy_threshold = 0.0
+        else:
+            sim.simulator.heuristic = 1 if heuristic else 0  # must be set BEFORE run(), not after
         sim.run(end_time, end_time / num_samples)
         times = sim.history.index
         counts = {sp: sim.history[sp] for sp in species_to_plot}
@@ -320,12 +373,12 @@ def plot_trajectory(
 
     handles, labels = ax.get_legend_handles_labels()
 
-    if with_nonpassive and backend == "rebop":
+    if show_non_passive and backend == "rebop":
         print(
             "note: the non-passive reaction fraction is only available for "
             "backend='batss' (rebop has no passive reactions); skipping it."
         )
-    if with_nonpassive and sim is not None:
+    if show_non_passive and sim is not None:
         # The non-passive reaction fraction at each recorded time, measured directly from that
         # snapshot's configuration (parallel to sim.history.index).
         ax2 = ax.twinx()

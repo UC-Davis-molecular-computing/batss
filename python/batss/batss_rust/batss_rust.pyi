@@ -34,6 +34,16 @@ class Simulator(ABC):
     silent: bool
     """TODO"""
 
+    k0_manual_multiplier: float
+    """
+    Experiment override (BatchSimulator only). If > 0, K is reset toward ``round(k0_manual_multiplier
+    * n)`` instead of the throughput-optimal ``min(2n, crossover)``; used to sweep K and locate the
+    batch-count optimum. 0 (default) disables the override.
+    """
+
+    k_resets: int
+    """Number of K resets performed so far (observability; BatchSimulator only, read-only)."""
+
     def run_until_silent(self) -> None:
         """TODO"""
         ...
@@ -54,9 +64,12 @@ class Simulator(ABC):
 
     def non_passive_reaction_probability(self) -> float:
         """
-        The probability that the next reaction is non-passive (i.e. actually changes the
-        configuration in the original CRN), computed from the current configuration's species
-        counts. Well-defined in both batch and Gillespie phases.
+        The probability that the next sampled reaction is non-passive (i.e. actually changes the
+        configuration in the original CRN). It is a function of the current configuration -- the full
+        state including the filler-species (K) count, not the original species counts alone. Because K
+        drifts over a run (reset toward its target only when K leaves a multiplicative band around it,
+        and frozen during Gillespie phases), the same original-species counts can give different values
+        as K drifts. Well-defined in both batch and Gillespie phases.
         """
         ...
 
