@@ -15,7 +15,7 @@ the switching state lives in the `SwitchState` struct.
   dominated by **f128 high-precision `ln_gamma` collision sampling** (`sample_collision_fast_f128`)
   plus hypergeometric/multinomial sampling and, when the K-count drifts, a `construct_transition_arrays`
   rebuild. Its advantage is asymptotic: cost per unit simulated time falls like ~1/√n, so it wins at
-  large n **when a healthy fraction of reactions are non-passive**.
+  large n **when a healthy fraction of reactions are active**.
 - **Gillespie mode** (`gillespie_steps`): delegates to rebop's exact SSA. Runs ~√n reactions per
   call, cheap per reaction, no per-batch machinery. Entering it rebuilds the rebop object once
   (`initialize_gillespie_config`); leaving it syncs the urn (`finalize_gillespie`).
@@ -24,11 +24,11 @@ The two engines are both exact; switching only changes speed, never the distribu
 
 ## The original rule (still available as `HEURISTIC_PROXY`)
 
-Switch to Gillespie when the **expected number of non-passive reactions in the next batch** is below
+Switch to Gillespie when the **expected number of active reactions in the next batch** is below
 the reaction count:
 
 ```
-rough = non_passive_probability * sqrt(n_including_extra_species)   // expected non-passive rxns
+rough = active_probability * sqrt(n_including_extra_species)   // expected active rxns
 use_gillespie = rough < num_reactions                              // num_reactions = proxy_threshold
 ```
 
@@ -128,7 +128,7 @@ the Oregonator — consistent with "batch's fixed per-batch overhead is worth ~1
 | time | 0.31s (batch, correct) | 0.59s (Gillespie, 2.8× too slow) |
 
 No single fixed `proxy_threshold` separates "Oregonator wants Gillespie" from "Dimerization wants
-batch" — because `rough = non_passive_probability·√n` alone doesn't encode batch's per-batch cost,
+batch" — because `rough = active_probability·√n` alone doesn't encode batch's per-batch cost,
 which depends on n and CRN structure. The likely next step is a **predictive formula** for the
 threshold (or for batch's per-batch overhead in units of reactions) from measurable quantities
 (n, reaction order/generativity, the f128 collision-sampling cost model), so the proxy predicts the

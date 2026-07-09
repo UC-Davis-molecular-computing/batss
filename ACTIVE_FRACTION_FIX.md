@@ -1,7 +1,7 @@
-# Non-passive reaction fraction: the drifting-K bug and its fix
+# Active reaction fraction: the drifting-K bug and its fix
 
-This documents a bug in the **non-passive reaction fraction** that `Simulation` records for plotting
-(`Simulation.non_passive_fractions`), why it made the plotted fraction disagree with itself at equal
+This documents a bug in the **active reaction fraction** that `Simulation` records for plotting
+(`Simulation.active_fractions`), why it made the plotted fraction disagree with itself at equal
 configurations, and the fix. All simulator code is in
 [`src/simulator_crn.rs`](src/simulator_crn.rs); the recording happens in
 [`python/batss/simulation.py`](python/batss/simulation.py).
@@ -9,7 +9,7 @@ configurations, and the fix. All simulator code is in
 ## What the quantity is supposed to be
 
 When `plot_trajectory` draws a trajectory it overlays, on a second y-axis, the *fraction of reactions
-that are non-passive* — the fraction that actually change the configuration of the original CRN, as
+that are active* — the fraction that actually change the configuration of the original CRN, as
 opposed to the passive self-loops the batching algorithm's modified CRN introduces. It is meant to be
 a **function of the configuration alone**: at a given vector of species counts there is one right
 answer, so two snapshots with the same counts must show the same fraction. That is exactly what the
@@ -31,11 +31,11 @@ Same populations, a 4× difference in the "fraction." The last column is the tel
 
 ## Root cause: the denominator includes the drifting filler species K
 
-The fraction is computed by `non_passive_reaction_probability`
+The fraction is computed by `active_reaction_probability`
 ([`simulator_crn.rs:996`](src/simulator_crn.rs#L996)) as a ratio of two propensities:
 
 ```
-fraction = total_propensity(non-passive) / total_propensity(including passive)
+fraction = total_propensity(active) / total_propensity(including passive)
 ```
 
 - **Numerator** — `calculate_total_propensity(false)`
@@ -69,13 +69,13 @@ K. The bug was only in reusing this actual-K value as if it were configuration-o
 
 ## The fix: evaluate at the canonical filler count K = n
 
-Add a sibling method `non_passive_reaction_probability_canonical`
+Add a sibling method `active_reaction_probability_canonical`
 ([`simulator_crn.rs:1017`](src/simulator_crn.rs#L1017)) that keeps the (already correct) numerator but
 fixes the denominator's population at the **canonical** value the algorithm targets, `K = n`, giving a
 total population of `2n`:
 
 ```rust
-pub fn non_passive_reaction_probability_canonical(&self) -> f64 {
+pub fn active_reaction_probability_canonical(&self) -> f64 {
     let real_propensity = self.calculate_total_propensity(false);   // config-only numerator
     let total_including_passive = self.get_exponential_rate(2 * self.n);  // canonical denominator
     if total_including_passive == 0.0 { return 0.0; }
@@ -91,7 +91,7 @@ functions of the configuration alone, so equal configurations give equal fractio
 
 `Simulation.add_config` ([`simulation.py:865`](python/batss/simulation.py#L865)) now records this
 canonical value; the switching heuristic in `run` is untouched and keeps using the actual-K
-`non_passive_reaction_probability`.
+`active_reaction_probability`.
 
 ### Why K = n rather than K = 0
 
@@ -112,21 +112,21 @@ Re-running the LV trajectory (n = 10⁵, t = 20, seed 1) after the fix:
   **~0.4** (before) to **~0.002** (after) — the residual being genuine small differences in `(R, F)`
   within a bin, not K drift.
 - The overlaid fraction is now smooth and periodic, matching the periodicity of `R` and `F` (see
-  [`examples/data/nonpassive_fix_before_after.png`](examples/data/nonpassive_fix_before_after.png):
+  [`examples/data/active_fraction_fix_before_after.png`](examples/data/active_fraction_fix_before_after.png):
   left = before, stepped and non-repeating; right = after, smooth and repeating).
 
 ## Expected vs. actual, and why Lotka–Volterra swings more than the paper's Figure 4
 
 The recorded fraction is an **expected** value — a propensity ratio evaluated at the snapshot. The
 batss paper (arXiv:2508.04079, Figure 4, top) instead plots the **actual** fraction, *counting* the
-non-passive reactions the batches materialized, and reports it staying "around half" for
+active reactions the batches materialized, and reports it staying "around half" for
 Lotka–Volterra. That is a different measurement, so it is worth checking the expected value against a
 direct count and understanding why the current benchmark swings from ~0.27 to ~0.63 rather than
 hovering near 0.5.
 
 **The expected calculation is faithful to what the algorithm actually samples.** Temporarily counting
-non-passive vs. total reactions inside `batch_step` (with Gillespie switching disabled, so it is pure
-batch mode), the counted fraction tracks the propensity-based `non_passive_reaction_probability`
+active vs. total reactions inside `batch_step` (with Gillespie switching disabled, so it is pure
+batch mode), the counted fraction tracks the propensity-based `active_reaction_probability`
 (evaluated at the *actual* current K) to an RMS of **0.015** over the LV run — they lie on top of each
 other (see [`examples/data/actual_vs_expected.png`](examples/data/actual_vs_expected.png)). So the
 fraction is not being miscomputed; the propensity ratio is exactly the sampling probability. That
@@ -134,7 +134,7 @@ plot also shows the actual/actual-K curve carries **step discontinuities** at ea
 artifact the canonical fix removes — while the canonical curve is its smooth, configuration-only
 envelope.
 
-**The size of the swing is set by the trajectory, not the measurement.** The non-passive fraction is
+**The size of the swing is set by the trajectory, not the measurement.** The active fraction is
 essentially a function of the population `n_real = R + F`: with the canonical denominator
 `binomial(2·n_real, 2)` growing faster than the real propensity, the fraction falls monotonically as
 `n_real` grows (from ~0.63 at `n_real = n` to ~0.27 at `n_real ≈ 3.5n`). Plotting the fraction against
@@ -147,7 +147,7 @@ axis of only 50000–100000, i.e. a much **narrower** orbit whose `n_real` barel
 fraction stays flat near ½. Same algorithm, same measurement; a smaller-amplitude trajectory.
 
 **The K policy matches the paper.** Section 6.3.2 states "we set #K = n … when we reset #K, since this
-gives … a Ω(1) constant fraction of sampled reactions [that] are non-passive" — exactly what
+gives … a Ω(1) constant fraction of sampled reactions [that] are active" — exactly what
 `reset_k_count` does. So the swing is not a K-policy regression; it is the honest fraction for a
 wide-amplitude oscillator.
 
@@ -158,11 +158,11 @@ measurement is wanted.)
 ## Files changed
 
 - [`src/simulator_crn.rs`](src/simulator_crn.rs): added
-  `non_passive_reaction_probability_canonical`; expanded the doc comment on
-  `non_passive_reaction_probability` to spell out that its denominator is actual-K (correct for the
+  `active_reaction_probability_canonical`; expanded the doc comment on
+  `active_reaction_probability` to spell out that its denominator is actual-K (correct for the
   heuristic, wrong for plotting). Rebuild the extension after editing
   (`CARGO_TARGET_DIR="$LOCALAPPDATA/batss-cargo-target" maturin develop --release`).
 - [`python/batss/simulation.py`](python/batss/simulation.py): `add_config` records the canonical
-  value; updated the `non_passive_fractions` field docstring.
+  value; updated the `active_fractions` field docstring.
 - [`python/batss/batss_rust/batss_rust.pyi`](python/batss/batss_rust/batss_rust.pyi): declared the new
   method and corrected the description of the old one.

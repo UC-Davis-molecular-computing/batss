@@ -7,7 +7,7 @@ Define a CRN once as a :class:`CRNSpec`, then hand it to
 * :func:`benchmark_runtimes` + :func:`plot_runtimes` to measure how run time
   scales with population size ``n``, batss vs rebop, and
 * :func:`plot_trajectory` to plot species counts over time from a single batss
-  run, optionally overlaying the fraction of non-passive (real) reactions on a
+  run, optionally overlaying the fraction of active (real) reactions on a
   dashed second y-axis.
 
 The runtime benchmark caches per-(backend, n) measurements to JSON so reruns
@@ -294,7 +294,7 @@ def plot_runtimes(
     return ax
 
 
-# --- plot 2: trajectory + non-passive-reaction fraction -----------------------
+# --- plot 2: trajectory + active-reaction fraction -----------------------
 
 
 def plot_trajectory(
@@ -306,7 +306,7 @@ def plot_trajectory(
     seed: int = 1,
     num_samples: int = 1000,
     species: list[str] | None = None,
-    show_non_passive: bool = False,
+    show_active: bool = False,
     figsize: tuple[float, float] = (8, 4),
     ax: Axes | None = None,
     loc: str = "best",
@@ -317,10 +317,10 @@ def plot_trajectory(
     ``backend`` is either ``"batss"`` (the default) or ``"rebop"``.
 
     The count y-axis starts at 0 (so the x-axis sits at y=0). When
-    ``show_non_passive=True`` and ``backend == "batss"``, the fraction of
-    non-passive (real) reactions is drawn as a dashed line on a second y-axis
+    ``show_active=True`` and ``backend == "batss"``, the fraction of
+    active (real) reactions is drawn as a dashed line on a second y-axis
     (range [0, 1]). This also forces the simulator into pure batching mode (it
-    never switches to Gillespie): the non-passive fraction is a batch-algorithm
+    never switches to Gillespie): the active fraction is a batch-algorithm
     quantity -- Gillespie simulates only real reactions, so during a Gillespie
     phase the value would reflect a frozen filler count K rather than active
     batching. rebop has no notion of passive reactions, so that line is omitted
@@ -345,10 +345,10 @@ def plot_trajectory(
     sim: Simulation | None = None
     if backend == "batss":
         sim = _batss_sim(spec, n, seed)
-        if show_non_passive:
-            # Force pure batching mode so the non-passive fraction is measured where it is meaningful.
+        if show_active:
+            # Force pure batching mode so the active fraction is measured where it is meaningful.
             # The proxy heuristic with threshold 0 never switches to Gillespie: it would require a
-            # batch's expected non-passive reaction count to fall below 0, and it is always >= 0.
+            # batch's expected active reaction count to fall below 0, and it is always >= 0.
             sim.simulator.heuristic = 1
             sim.simulator.proxy_threshold = 0.0
         else:
@@ -373,23 +373,23 @@ def plot_trajectory(
 
     handles, labels = ax.get_legend_handles_labels()
 
-    if show_non_passive and backend == "rebop":
+    if show_active and backend == "rebop":
         print(
-            "note: the non-passive reaction fraction is only available for "
+            "note: the active reaction fraction is only available for "
             "backend='batss' (rebop has no passive reactions); skipping it."
         )
-    if show_non_passive and sim is not None:
-        # The non-passive reaction fraction at each recorded time, measured directly from that
+    if show_active and sim is not None:
+        # The active reaction fraction at each recorded time, measured directly from that
         # snapshot's configuration (parallel to sim.history.index).
         ax2 = ax.twinx()
         ax2.plot(
             sim.history.index,
-            sim.non_passive_fractions,
-            label="non-passive",
+            sim.active_fractions,
+            label="active",
             linestyle="--",
             color="#d62728",
         )
-        ax2.set_ylabel("fraction of non-passive reactions")
+        ax2.set_ylabel("fraction of active reactions")
         ax2.set_ylim(0.0, 1.0)
         h2, l2 = ax2.get_legend_handles_labels()
         handles += h2

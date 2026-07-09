@@ -160,8 +160,8 @@ impl UniformCRN {
             let total_adjusted_rate_constant = total_rate_constant / artificial_speedup_factor;
             // The batching algorithm needs to know how much continuous time one step corresponds to.
             // This function is doing the calculation that can determine this.
-            // When batching, the reactant set with the highest total rate constant always causes a
-            // non-passive reaction when chosen, and the number of ways to choose it is equal to
+            // When batching, the reactant set with the highest total rate constant always causes an
+            // active reaction when chosen, and the number of ways to choose it is equal to
             // its propensity times its symmetry degree.
             // The missing factor to convert between the expected time to this reaction in the
             // original CRN and the batching CRN is the total rate constant.
@@ -181,7 +181,7 @@ impl UniformCRN {
         let mut random_transitions = ArrayD::<usize>::zeros(shape_vec);
         let mut random_outputs: Vec<Vec<State>> = Vec::new();
         let mut random_probabilities: Vec<f64> = Vec::new();
-        // Add any non-passive reactions. Passive reactions don't need any special handling.
+        // Add any active reactions. Passive reactions don't need any special handling.
         let mut cur_output_index = 0;
         flame::start("construct_transition_arrays: second reaction loop");
         for reaction in &self.reactions {
@@ -303,10 +303,10 @@ pub struct SwitchState {
     /// HEURISTIC_PROXY (1): use only the original reaction-count rule (no timing, no probing).
     #[pyo3(get)]
     pub heuristic: u8,
-    /// Reaction-count rule threshold: prefer Gillespie when the expected number of non-passive
+    /// Reaction-count rule threshold: prefer Gillespie when the expected number of active
     /// reactions in the next batch is below this. Defaults to the reaction count (the original
     /// rule). Raise it to model batch mode's fixed per-batch overhead -- i.e. require more expected
-    /// non-passive reactions before batching is worth it.
+    /// active reactions before batching is worth it.
     #[pyo3(get)]
     pub proxy_threshold: f64,
 
@@ -439,9 +439,9 @@ pub struct BatchSimulator {
 
     /// An (o + 1)-dimensional array. The first o dimensions represent reactants. After indexing through
     /// the first o dimensions, the last dimension always has size two, with elements (`num_outputs`, `first_idx`).
-    /// `num_outputs` is the number of possible outputs if transition i,j --> ... is non-passive,
+    /// `num_outputs` is the number of possible outputs if transition i,j --> ... is active,
     /// otherwise it is 0. `first_idx` gives the starting index to find
-    /// the outputs in the array `self.random_outputs` if it is non-passive.
+    /// the outputs in the array `self.random_outputs` if it is active.
     /// TODO: it would be much, much more readable if this was o-dimensional of pairs,
     /// rather than (o+1)-dimensional.
     /// #[pyo3(get, set)] // XXX: for testing
@@ -540,8 +540,8 @@ impl BatchSimulator {
     ///         Delta[i, j] gives contains the two output states.
     ///     random_transitions: A q^o x 2 array. That is, it has o+1 dimensions, all but the last have length q,
     ///         and the last dimension always has length two.
-    ///         Entry [r, 0] is the number of possible outputs if transition on reactant set r is non-passive,
-    ///         otherwise it is 0. Entry [r, 1] gives the starting index to find the outputs in the array random_outputs if it is non-passive.
+    ///         Entry [r, 0] is the number of possible outputs if transition on reactant set r is active,
+    ///         otherwise it is 0. Entry [r, 1] gives the starting index to find the outputs in the array random_outputs if it is active.
     ///     random_outputs: A ? x (o + g) array containing all outputs of random transitions,
     ///         whose indexing information is contained in random_transitions.
     ///     transition_probabilities: A 1D length-? array containing all random transition probabilities,
@@ -676,7 +676,7 @@ impl BatchSimulator {
         self.switch.heuristic = value;
     }
 
-    /// Threshold for the reaction-count proxy rule (prefer Gillespie when the expected non-passive
+    /// Threshold for the reaction-count proxy rule (prefer Gillespie when the expected active
     /// reactions in the next batch fall below it). See :class:`SwitchState`.
     #[getter]
     pub fn proxy_threshold(&self) -> f64 {
@@ -779,13 +779,13 @@ impl BatchSimulator {
             // reaction-count rule; HEURISTIC_WALLCLOCK (default) starts from that rule but lets a
             // measured wall-clock-per-continuous-time (w/dt) comparison override it once the other
             // mode is measured decisively cheaper, probing the other mode occasionally to measure it.
-            let non_passive_probability = self.non_passive_reaction_probability();
-            if non_passive_probability == 0.0 {
+            let active_probability = self.active_reaction_probability();
+            if active_probability == 0.0 {
                 self.silent = true;
             }
-            let rough_expected_non_passive_reactions_next_batch =
-                non_passive_probability * (self.n_including_extra_species as f64).sqrt();
-            let proxy_gillespie = rough_expected_non_passive_reactions_next_batch < self.switch.proxy_threshold;
+            let rough_expected_active_reactions_next_batch =
+                active_probability * (self.n_including_extra_species as f64).sqrt();
+            let proxy_gillespie = rough_expected_active_reactions_next_batch < self.switch.proxy_threshold;
 
             if self.switch.heuristic == HEURISTIC_PROXY {
                 // Simpler heuristic: the reaction-count rule alone, no timing-based override.
@@ -1048,15 +1048,15 @@ impl BatchSimulator {
         }
         return answer;
     }
-    /// The probability that the next sampled reaction is non-passive (actually changes the original
+    /// The probability that the next sampled reaction is active (actually changes the original
     /// CRN's configuration): `P_real / P_total`, where `P_total = calculate_total_propensity(true)` uses
     /// `n_including_extra_species`, the current population including the filler species K. It is a
     /// function of the current configuration -- the full urn state including the count of K, not the
     /// original species counts alone. Since K drifts over the run (restored to n only when K/n leaves
     /// [0.5, 2], and frozen during Gillespie phases), two snapshots with the same original-species
-    /// counts but different K report different values. Used to record `Simulation.non_passive_fractions`
+    /// counts but different K report different values. Used to record `Simulation.active_fractions`
     /// and by the switching heuristic in `run`.
-    pub fn non_passive_reaction_probability(&self) -> f64 {
+    pub fn active_reaction_probability(&self) -> f64 {
         let total_propensity_not_including_passive_reactions = self.calculate_total_propensity(false);
         let total_propensity_including_passive_reactions = self.calculate_total_propensity(true);
         assert!(
@@ -1070,7 +1070,7 @@ impl BatchSimulator {
 
     // Observability for the optimal-K analysis: expose the propensity components, CRN constants, the
     // config-independent crossover, and the current reset target.
-    pub fn debug_p_nonpassive(&self) -> f64 {
+    pub fn debug_p_active(&self) -> f64 {
         self.calculate_total_propensity(false)
     }
     pub fn debug_p_total(&self) -> f64 {
@@ -1113,9 +1113,9 @@ const WDT_PROBE_INTERVAL: u64 = 256;
 const WDT_PROBE_INTERVAL_COMMITTED: u64 = 8192;
 
 // Rebuild K only once it has drifted more than this multiplicative factor from its target
-// min(2n, crossover). Smaller = K tracks the optimum more tightly (smaller jumps in the non-passive
+// min(2n, crossover). Smaller = K tracks the optimum more tightly (smaller jumps in the active
 // fraction each time it resets) but rebuilds more often; larger = fewer rebuilds, bigger jumps.
-// (This is why changing it visibly changes the non-passive-fraction trace: each reset is a jump back
+// (This is why changing it visibly changes the active-fraction trace: each reset is a jump back
 // to the optimal K, and this factor sets how far K drifts -- and how big the jump is -- between resets.)
 const K_RESET_BAND_FACTOR: f64 = 1.1;
 
@@ -1420,11 +1420,11 @@ impl BatchSimulator {
                     .add_to_entry(self.crn.w, (quantity * self.crn.g as u64) as i64);
                 flame::end("passive reaction");
             } else {
-                flame::start("non-passive reaction");
+                flame::start("active reaction");
                 let mut probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
-                let non_passive_probability_sum: f64 = probabilities.iter().sum();
-                if non_passive_probability_sum < 1.0 {
-                    probabilities.push(1.0 - non_passive_probability_sum);
+                let active_probability_sum: f64 = probabilities.iter().sum();
+                if active_probability_sum < 1.0 {
+                    probabilities.push(1.0 - active_probability_sum);
                 }
                 flame::start("multinomial sample");
                 multinomial_sample(
@@ -1447,7 +1447,7 @@ impl BatchSimulator {
                     }
                 }
                 // Add any W produced by passive reactions, and add those reactants to updated_counts.
-                if non_passive_probability_sum < 1.0 {
+                if active_probability_sum < 1.0 {
                     let passive_count = self.m[num_outputs];
                     self.updated_counts
                         .add_to_entry(self.crn.w, (passive_count * self.crn.g as u64) as i64);
@@ -1455,7 +1455,7 @@ impl BatchSimulator {
                         self.updated_counts.add_to_entry(reactant, passive_count as i64);
                     }
                 }
-                flame::end("non-passive reaction");
+                flame::end("active reaction");
             }
             assert_eq!(
                 quantity * (self.crn.o + self.crn.g) as u64,
@@ -1547,9 +1547,9 @@ impl BatchSimulator {
                 self.updated_counts.add_to_entry(self.crn.w, (self.crn.g) as i64);
             } else {
                 let mut probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
-                let non_passive_probability_sum: f64 = probabilities.iter().sum();
-                if non_passive_probability_sum < 1.0 {
-                    probabilities.push(1.0 - non_passive_probability_sum);
+                let active_probability_sum: f64 = probabilities.iter().sum();
+                if active_probability_sum < 1.0 {
+                    probabilities.push(1.0 - active_probability_sum);
                 }
                 flame::start("multinomial sample");
                 multinomial_sample(1, &probabilities, &mut self.m[0..probabilities.len()], &mut self.rng);
@@ -1567,7 +1567,7 @@ impl BatchSimulator {
                     }
                 }
                 // Add W if the collision was a probabilistic passive reaction.
-                if non_passive_probability_sum < 1.0 {
+                if active_probability_sum < 1.0 {
                     let passive_count = self.m[num_outputs];
                     self.updated_counts
                         .add_to_entry(self.crn.w, (passive_count * self.crn.g as u64) as i64);
@@ -1639,7 +1639,7 @@ impl BatchSimulator {
         self.continuous_time = gillespie.get_time();
 
         // Sync the counts rebop just changed back into self.urn. Without this, the propensity
-        // calculated at the top of this function (and by non_passive_reaction_probability in the
+        // calculated at the top of this function (and by active_reaction_probability in the
         // switching heuristic in run) is based on the stale configuration from when we entered
         // Gillespie mode. If the propensity has dropped a lot since then (e.g. a fast species
         // was consumed), the stale propensity makes time_to_run_gillespie so small that the
@@ -1685,8 +1685,8 @@ impl BatchSimulator {
 
     /// Helper to calculate the total propensity of the CRN given the current configuration in `self.urn`.
     /// Note that this value will be the same whether we want the total propensity of the original CRN in the
-    /// current configuration, or the total propensity of non-passive reactions in the modified CRN;
-    /// this must be true because the algorithm is exact, so the expected time until any non-passive reaction must
+    /// current configuration, or the total propensity of active reactions in the modified CRN;
+    /// this must be true because the algorithm is exact, so the expected time until any active reaction must
     /// be the same as the expected time until any reaction in the original CRN.
     /// We do this calculation in the original CRN, as it is more direct.
     /// If include_passive_reactions is true, calculates the total propensity in the new CRN including these.
@@ -1743,7 +1743,7 @@ impl BatchSimulator {
     }
 
     /// The count of K that `reset_k_count` aims for: the throughput-optimal `min(2n, crossover)`
-    /// (generally `min(n/(o-1.5), crossover)`). This maximizes E[l]*p, the expected non-passive
+    /// (generally `min(n/(o-1.5), crossover)`). This maximizes E[l]*p, the expected active
     /// reactions accomplished per (costly) batch: E[l] ~ c*sqrt(N) and p = P_real / (kmax * (N choose
     /// o)) with P_real independent of K, so minimizing the batch count means minimizing
     /// kmax(k0)*N^(o-1/2). kmax falls as 1/k0 (a padded reaction is the bottleneck) until it flattens

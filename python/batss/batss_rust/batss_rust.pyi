@@ -62,9 +62,9 @@ class Simulator(ABC):
         """
         ...
 
-    def non_passive_reaction_probability(self) -> float:
+    def active_reaction_probability(self) -> float:
         """
-        The probability that the next sampled reaction is non-passive (i.e. actually changes the
+        The probability that the next sampled reaction is active (i.e. actually changes the
         configuration in the original CRN). It is a function of the current configuration -- the full
         state including the filler-species (K) count, not the original species counts alone. Because K
         drifts over a run (reset toward its target only when K leaves a multiplicative band around it,

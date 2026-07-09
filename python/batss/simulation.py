@@ -127,11 +127,11 @@ class Simulation:
     times: list[float]
     """A list of all the corresponding times for configs."""
 
-    non_passive_fractions: list[float]
+    active_fractions: list[float]
     """
-    Parallel to self.times and self.configs: the fraction of reactions that are non-passive
+    Parallel to self.times and self.configs: the fraction of reactions that are active
     (i.e. that actually change the configuration in the original CRN) at each recorded time, from
-    :meth:`batss_rust.BatchSimulator.non_passive_reaction_probability`. It depends only on the current
+    :meth:`batss_rust.BatchSimulator.active_reaction_probability`. It depends only on the current
     configuration -- but that means the full simulator state, INCLUDING the count of the filler species
     K, not the original species counts alone. Because K drifts over the run (restored to n only when
     K/n leaves [0.5, 2], and frozen during Gillespie phases), two snapshots with the same
@@ -247,14 +247,14 @@ class Simulation:
 
                 ``'symmetric'``:
                     The input pairs are interpreted as unordered. If rule(a, b)
-                    returns None, while rule(b, a) has a non-passive output, then the
+                    returns None, while rule(b, a) has an active output, then the
                     output of rule(a, b) is assumed to be the same as rule(b, a).
                     If rule(a, b) and rule(b, a) are each given, there is no effect.
                     Asymmetric interactions can be explicitly included this way.
 
                 ``'symmetric_enforced'``:
                     The same as symmetric, except that if rule(a, b)
-                    and rule(b, a) are non-passive and do not give the same set of outputs,
+                    and rule(b, a) are active and do not give the same set of outputs,
                     a ValueError is raised.
 
             seed: An optional integer used as the seed for all pseudorandom number
@@ -289,7 +289,7 @@ class Simulation:
                     sim = Simulation(init_config, rule, threshold=20)
 
         """
-        self.non_passive_fractions = []
+        self.active_fractions = []
         self.simulator_method = simulator_method
         self.seed = seed
         self.rng = np.random.default_rng(seed)
@@ -498,7 +498,7 @@ class Simulation:
                             passive_transitions[i, j] = passive_transitions[j, i]
                             delta[i, j] = delta[j, i]
                             random_transitions[i, j] = random_transitions[j, i]
-                        # If i, j and j, i are both non-passive, with symmetric_enforced, check outputs are equal
+                        # If i, j and j, i are both active, with symmetric_enforced, check outputs are equal
                         elif self._transition_order.lower() == "symmetric_enforced" and not passive_transitions[j, i]:
                             if (
                                 sorted(delta[i, j]) != sorted(delta[j, i])
@@ -703,7 +703,7 @@ class Simulation:
     @property
     def reactions(self) -> str:
         """
-        A string showing all non-passive transitions in reaction notation.
+        A string showing all active transitions in reaction notation.
 
         Each reaction is separated by newlines, so that ``print(self.reactions)`` will display all reactions.
         Only works with simulator method multibatch, otherwise will raise a ValueError.
@@ -718,7 +718,7 @@ class Simulation:
     @property
     def enabled_reactions(self) -> str:
         """
-        A string showing all non-passive transitions that are currently enabled.
+        A string showing all active transitions that are currently enabled.
 
         This can only check the current configuration in self.simulator.
         Each reaction is separated by newlines, so that ``print(self.enabled_reactions)``
@@ -856,10 +856,10 @@ class Simulation:
         self.configs.append(np.array(self.simulator.config))
         self.times.append(self.time)
 
-        # Record the non-passive reaction fraction (see the non_passive_fractions field). Computed from
+        # Record the active reaction fraction (see the active_fractions field). Computed from
         # the current configuration (which includes the filler count K), not tallied during batch steps,
         # so it stays well-defined across batch/Gillespie mode switches.
-        self.non_passive_fractions.append(self.simulator.non_passive_reaction_probability())
+        self.active_fractions.append(self.simulator.active_reaction_probability())
 
     def set_snapshot_time(self, time: float) -> None:
         """Updates all snapshots to the nearest recorded configuration to a specified time.

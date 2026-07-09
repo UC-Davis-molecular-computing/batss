@@ -14,7 +14,7 @@ confirmed empirically (see [Empirical validation](#empirical-validation)).
 | $o$ | order of the CRN, i.e. the largest reactant count of any reaction |
 | $a$ | original order of one reaction (before padding); $\delta_0 = o - a$ fillers are added to it |
 | $v$ | volume; rate constants are given in the deterministic/macroscopic convention, so an $a$-reactant reaction's rate is divided by $v^{a-1}$ |
-| $p$ | probability a sampled $o$-molecule set fires a *real* (non-passive) reaction |
+| $p$ | probability a sampled $o$-molecule set fires a *real* (active) reaction |
 | $\mathbb{E}[\ell]$ | expected collision-free run length: reactions per batch before a collision |
 | $k_{\max}$ | largest adjusted rate constant over all reactions (`continuous_time_correction_factor`) |
 
@@ -490,7 +490,7 @@ the behavior is:
 
 - when $n \gg \mathrm{crossover}$ (LV at its population peaks), $K=n$ *overshoots* the optimum,
   inflating $N$ and wasting batches. This is where the new policy wins.
-- it also makes the non-passive fraction wobble and jump, because that fraction depends on the
+- it also makes the active fraction wobble and jump, because that fraction depends on the
   drifting, periodically reset $\mathbf{K}$. This is the artifact behind the "the fraction differs at
   near-identical configurations" observation. Pinning $\mathbf{K}$ at the constant crossover removes
   the drift and the jumps.
@@ -501,7 +501,7 @@ All measured with the actual sampled $\mathbb{E}[\ell]$ (`sample_collision`) and
 config, $\arg\max_K \mathbb{E}[\ell] \cdot p$ is the batch-optimal $\mathbf{K}$.
 
 - **Batch counts (pure batch, $n=10^5$):** LV has **$1.4$-$1.5\times$ fewer batches** under
-  $\min(2n,\mathrm{crossover})$ than under $K=n$, with a flat non-passive fraction of about $0.62$
+  $\min(2n,\mathrm{crossover})$ than under $K=n$, with a flat active fraction of about $0.62$
   versus the old policy's $0.28$-$0.63$ with reset jumps. Oregonator is about $1.03\times$ because its
   crossover is about $n$, so $K=n$ was already near-optimal.
 - **Volume scaling ($n$ fixed at $10^5$, $v$ varied):** the optimum doubles when $v$ doubles and halves
@@ -528,7 +528,7 @@ config, $\arg\max_K \mathbb{E}[\ell] \cdot p$ is the batch-optimal $\mathbf{K}$.
   population moves, it tracks $2n$ (Rössler upward past the crossover; the Shrinking CRN
   $A\to\emptyset,\ B\to\emptyset,\ 2A\to 2B$ downward, where a frozen crossover-sized $\mathbf{K}$
   would be about $7.5\times$ slower).
-- **The non-passive-fraction "jumps"** seen when plotting are these rebuilds: between resets
+- **The active-fraction "jumps"** seen when plotting are these rebuilds: between resets
   $\mathbf{K}$ is fixed while $n$ moves, so the fraction drifts, then snaps back to the optimum at each
   reset. A smaller `K_RESET_BAND_FACTOR` makes the jumps smaller and more frequent; removing them
   entirely would require rebuilding every batch.
