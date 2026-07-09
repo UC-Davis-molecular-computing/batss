@@ -115,9 +115,9 @@ def plot_passive_reactions(pop_exponent: int, seed: int) -> None:
     print(f"running batss with n = 10^{pop_exponent}")
     sim.run(end_time, end_time / num_samples)
 
-    # Non-passive reaction fraction at each recorded time, measured directly from that snapshot's
+    # Active reaction fraction at each recorded time, measured directly from that snapshot's
     # configuration (correct across batch/Gillespie switches, unlike a batch-step tally).
-    non_passive_fractions = np.array(sim.non_passive_fractions)
+    active_fractions = np.array(sim.active_fractions)
     times = sim.history.index.tolist()
 
     f, ax = plt.subplots(figsize=figsize)
@@ -135,11 +135,11 @@ def plot_passive_reactions(pop_exponent: int, seed: int) -> None:
     # Create a second y-axis that shares the same x-axis
     ax2 = ax.twinx()
 
-    # Plot passive_fractions on the second y-axis
-    ax2.plot(times, non_passive_fractions, label="non-passive", color=red)
+    # Plot active_fractions on the second y-axis
+    ax2.plot(times, active_fractions, label="active", color=red)
 
     # Set up the right y-axis
-    ax2.set_ylabel("fraction of real (non-passive) reactions")
+    ax2.set_ylabel("fraction of real (active) reactions")
     ax2.set_ylim(0.0, 1.0)
 
     # Create a single legend with handles from both axes

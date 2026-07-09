@@ -131,7 +131,7 @@ def plot_passive_reactions(pop_exponent: int, seed: int) -> None:
 
     # Passive reaction fraction at each recorded time, measured directly from that snapshot's
     # configuration (correct across batch/Gillespie switches, unlike a batch-step tally).
-    passive_fractions = 1 - np.array(sim.non_passive_fractions)
+    passive_fractions = 1 - np.array(sim.active_fractions)
     times = sim.history.index.tolist()
 
     f, ax = plt.subplots(figsize=figsize)
