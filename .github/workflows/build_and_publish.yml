@@ -13,19 +13,16 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
+        # Build only architectures common in personal computers: x86_64 and arm64
+        # (aarch64). Dropped 32-bit x86, armv7, and the server-only s390x/ppc64le —
+        # near-zero desktop audience, and 32-bit x86 can't even resolve (NumPy 2 ships
+        # no 32-bit wheels for Python >=3.10). sdist remains for anything omitted; the
+        # musllinux and windows jobs follow the same policy.
         platform:
           - runner: ubuntu-latest
             target: x86_64
           - runner: ubuntu-latest
-            target: x86
-          - runner: ubuntu-latest
             target: aarch64
-          - runner: ubuntu-latest
-            target: armv7
-          - runner: ubuntu-latest
-            target: s390x
-          - runner: ubuntu-latest
-            target: ppc64le
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -48,15 +45,12 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
+        # Same personal-computer arch policy as the linux job: x86_64 + arm64 only.
         platform:
           - runner: ubuntu-latest
             target: x86_64
           - runner: ubuntu-latest
-            target: x86
-          - runner: ubuntu-latest
             target: aarch64
-          - runner: ubuntu-latest
-            target: armv7
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -79,11 +73,10 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
+        # x64 only; 32-bit win32 has no NumPy 2 wheels and near-zero desktop use.
         platform:
           - runner: windows-latest
             target: x64
-          - runner: windows-latest
-            target: x86
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -106,11 +99,19 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       matrix:
+        # macOS hosted runners retire on GitHub's N-1 OS-version cadence: macos-13
+        # (Ventura) was retired 2025-12-04, which is why a macos-13 job now hangs
+        # unassigned. Pin to currently-supported macOS 15 and build BOTH Mac
+        # architectures — macos-15 (Apple Silicon / arm64) and macos-15-intel
+        # (Intel / x86_64) — so wheels cover essentially all Mac users. Intel hosted
+        # runners exist until ~Fall 2027; bump both labels when macOS 15 nears retirement.
         platform:
-          - runner: macos-13
+          - runner: macos-15-intel
             target: x86_64
-          - runner: macos-14
+            deployment_target: "10.13"   # reach older Intel Macs (High Sierra, 2017+)
+          - runner: macos-15
             target: aarch64
+            deployment_target: "11.0"     # Apple Silicon floor (Big Sur); arm64 ignores lower
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -118,6 +119,8 @@ jobs:
           python-version: 3.x
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.platform.deployment_target }}
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist --find-interpreter
