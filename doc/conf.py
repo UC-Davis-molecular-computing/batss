@@ -7,10 +7,11 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath('..'))
 sys.path.insert(0, os.path.abspath('../python'))
 
-# Read version from pyproject.toml
-pyproject_path = Path(__file__).parents[1] / "pyproject.toml"
-pyproject_data = toml.load(str(pyproject_path))
-version = pyproject_data["project"]["version"]
+# Read version from Cargo.toml, the single source of truth for the version
+# (pyproject.toml declares it as dynamic, and maturin reads it from Cargo.toml)
+cargo_toml_path = Path(__file__).parents[1] / "Cargo.toml"
+cargo_data = toml.load(str(cargo_toml_path))
+version = cargo_data["package"]["version"]
 release = version
 
 # Project information

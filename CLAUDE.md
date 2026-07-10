@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+**At the start of every session, read [`CONTRIBUTING.md`](CONTRIBUTING.md) before doing anything
+else.** It documents the build/toolchain gotchas (nightly Rust pin, Dropbox/`CARGO_TARGET_DIR`,
+Windows file locks, testing CI builds locally) and the PyPI release process; this file only
+summarizes some of them.
+
 ## What this project is
 
 `batss` is a research library for **fast stochastic simulation of chemical reaction networks (CRNs)

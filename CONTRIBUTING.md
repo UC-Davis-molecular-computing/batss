@@ -10,6 +10,23 @@ pip install maturin
 
 You will also need a [Rust toolchain](https://rustup.rs/) (`cargo` and `rustc`).
 
+> **Nightly Rust is required.** The repo pins the nightly toolchain via `rust-toolchain.toml`,
+> because `src/util.rs` uses the nightly-only `f128` type. You don't need to do anything for
+> this: rustup reads the pin automatically and downloads nightly the first time you build in
+> this repo. What you must **not** do is override it — setting `RUSTUP_TOOLCHAIN=stable`,
+> `rustup override set stable`, or `cargo +stable` will bypass the pin and fail with a wall of
+> confusing errors in `util.rs` (`f128`, `cast_signed`, error E0554 "#![feature] may not be used
+> on the stable release channel"). If you see those errors, you are on stable; nothing is wrong
+> with the code. The GitHub CI honors the pin as well.
+
+> **Dropbox / synced-folder note:** if your clone lives inside Dropbox (or another file-syncing
+> folder), point cargo's build directory outside the synced tree, e.g.
+> `$env:CARGO_TARGET_DIR = "$env:LOCALAPPDATA/batss-cargo-target"` (PowerShell) or
+> `export CARGO_TARGET_DIR="$HOME/batss-cargo-target"` (macOS/Linux/WSL). This avoids syncing
+> gigabytes of build artifacts and an intermittent Windows file-lock error (`os error 32`) when
+> cargo writes `target/`. Note that with this set, `maturin build` writes wheels to
+> `$CARGO_TARGET_DIR/wheels/` instead of `target/wheels/` (unless you pass `--out`).
+
 Both of the commands below build the Rust extension and, by default, install it into the **currently active** virtual environment, so activate the environment you want to use first, e.g.:
 
 ```
@@ -69,10 +86,24 @@ pip install target/wheels/batss-1.0.3-<platform-tags>.whl
 
 Note that for actually publishing to PyPI you do not build wheels manually; that is handled automatically by the GitHub action described in the next section.
 
+### Testing the CI build locally
+
+The GitHub action (next section) uses [`PyO3/maturin-action`](https://github.com/PyO3/maturin-action), the official GitHub Action wrapper around the same maturin tool used above. On every platform it effectively runs
+
+```
+maturin build --release --out dist --find-interpreter
+```
+
+plus `maturin sdist --out dist` in a separate job. To test locally whether a platform's wheel will build, run exactly that command on that platform. Differences from real CI to be aware of:
+
+- **Linux wheels are built inside manylinux Docker containers** (for compatibility with old glibc). Building on a regular Ubuntu machine or WSL still verifies that the code compiles and links on Linux, which is the part that can realistically break — just not the manylinux glibc compliance.
+- `--find-interpreter` builds one wheel per Python interpreter it can find. On CI, `setup-python` guarantees discovery; locally it can fail with "Could not find any interpreters" (e.g., in non-interactive shells, or when your only Python is a venv). If so, point maturin at a specific interpreter instead: `maturin build --release --out dist -i path/to/python`.
+- `rebop` is a **required dependency on all platforms**, including macOS. (History, so nobody reintroduces the old workaround: macOS builds failed with rebop in Aug 2025, so it was feature-gated off there via `--no-default-features`, then removed entirely in v1.0.2. It was re-added afterward and now powers the exact-Gillespie fallback in `simulator_crn.rs`, so building without it is no longer possible.)
+
 ## Deploying to PyPI
 Deploying to the [PyPI website](https://pypi.org/project/batss/) is how users are able to install via `pip install batss`. This is done by a GitHub action in .github/workflows/build_and_publish.yml. It builds binary wheels (so that users do not need a Rust compiler to install) for each major platform and Python version and uploads them to PyPI. This is done automatically whenever there is a new GitHub release. The steps are
 
-1. Bump the version number in pyproject.toml, e.g., change 1.0.0 to 1.0.1 if the last uploaded version was 1.0.0 (or bump minor or major version numbers if appropriate according to [semantic versioning](https://semver.org/)). For the rest of this section assume the version number is 1.0.1.
+1. Bump the version number **in `Cargo.toml` — the only place the version is stored**, e.g., change 1.0.0 to 1.0.1 if the last uploaded version was 1.0.0 (or bump minor or major version numbers if appropriate according to [semantic versioning](https://semver.org/)). For the rest of this section assume the version number is 1.0.1. Then run `cargo update --workspace` to propagate it into `Cargo.lock` (any cargo build also does this automatically) and commit both files. Everything else derives from `Cargo.toml` automatically: `pyproject.toml` declares `dynamic = ["version"]`, [maturin's officially supported way](https://www.maturin.rs/metadata) of using the Rust crate version as the Python package version; `uv.lock` does not record a version for batss (it defers to the dynamic version); `batss.__version__` reads the installed package metadata at runtime; and `doc/conf.py` parses `Cargo.toml` directly.
 
 2. Commit this and other changes to the main branch and push to github.
 
@@ -85,3 +116,5 @@ Deploying to the [PyPI website](https://pypi.org/project/batss/) is how users ar
 6. If the action successfully completes, go to https://pypi.org/project/batss/ to verify that it is the latest version, 1.0.1 in this case.
 
 7. Recall above that the tag must not already be present. If you need to redo this due to a mistake, not only must you delete the release first, you must also click on Tags at the top of the Releases page and delete the tag. If you do not, then it will not successfully upload to PyPI.
+
+> **Dry-run tip / manual-trigger caveat:** the workflow also has a manual trigger (Actions → "Build and Publish Python Package" → Run workflow). This is useful to test that all platforms build *before* creating the release — if a platform fails, you avoid the delete-release-and-tag dance in step 7. But note that the publish job is **not** gated on the release event: if all builds succeed, a manual run **will upload to PyPI** whatever version is in `pyproject.toml` on the chosen branch (uploads use `--skip-existing`, so re-uploading an already-published version is a harmless no-op). So only dispatch it manually when either the version is already published, or it is the version you intend to publish anyway.

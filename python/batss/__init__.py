@@ -38,8 +38,9 @@ try:
 
     __version__ = version("batss")
 except Exception:
-    # Fallback for docs builds where package isn't installed
-    __version__ = "1.0.3"
+    # Placeholder for imports without installed metadata (e.g. docs builds, which import
+    # from source with batss_rust mocked). The real version lives only in pyproject.toml.
+    __version__ = "0.0.0+unknown"
 
 # Import order matters to avoid circular imports
 from batss.crn import *
