@@ -14,23 +14,19 @@
 $Workflow = 'build_and_publish.yml'
 $Ref = if ($args.Count -ge 1) { $args[0] } else { 'main' }
 
-if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-    Write-Error 'gh CLI not found - https://cli.github.com/'; exit 1
-}
+Write-Host '==> Checking gh CLI is installed and authenticated...'
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Write-Error 'gh CLI not found - https://cli.github.com/'; exit 1 }
 gh auth status *> $null
 if ($LASTEXITCODE -ne 0) { Write-Error 'gh not authenticated - run: gh auth login'; exit 1 }
 
-# Record the newest existing dispatch run BEFORE triggering. Right after dispatch,
-# gh briefly still returns the PREVIOUS run; watching that already-finished run is
-# what makes the script look like it "succeeds instantly". Wait for a NEW id instead.
+Write-Host '==> Recording the latest existing run (so we can spot the new one)...'
 $before = (gh run list --workflow=$Workflow --branch $Ref --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>$null | Out-String).Trim()
 
-Write-Host "Dispatching $Workflow on '$Ref' (build-only; nothing is published)..."
+Write-Host "==> Dispatching $Workflow on '$Ref' (build-only; nothing is published)..."
 gh workflow run $Workflow --ref $Ref
 if ($LASTEXITCODE -ne 0) { Write-Error 'workflow dispatch failed'; exit 1 }
 
-# Poll until a genuinely NEW run appears (id != the pre-dispatch latest).
-Write-Host -NoNewline 'Locating the new run'
+Write-Host -NoNewline '==> Waiting for the new run to register (GitHub briefly returns the old one)'
 $rid = $null
 for ($i = 0; $i -lt 30; $i++) {
     $cur = (gh run list --workflow=$Workflow --branch $Ref --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>$null | Out-String).Trim()
@@ -40,11 +36,11 @@ for ($i = 0; $i -lt 30; $i++) {
 Write-Host ''
 if (-not $rid) { Write-Error "couldn't find the dispatched run; try: gh run list --workflow=$Workflow"; exit 1 }
 
-Write-Host "Run: $(gh run view $rid --json url --jq .url)"
-Write-Host 'Watching to completion (Ctrl-C stops watching, not the run)...'
+Write-Host "==> Run: $(gh run view $rid --json url --jq .url)"
+Write-Host '==> Watching to completion (Ctrl-C stops watching, not the run)...'
 gh run watch $rid --exit-status --compact
 $status = $LASTEXITCODE
 
-Write-Host "`n=== per-job results ==="
+Write-Host "`n==> Per-job results:"
 gh run view $rid --json status,conclusion,jobs --jq '"overall: \(.status)/\(.conclusion // "-")\n" + ([.jobs[] | "  [\(.conclusion // .status)] \(.name)"] | join("\n"))'
 exit $status
