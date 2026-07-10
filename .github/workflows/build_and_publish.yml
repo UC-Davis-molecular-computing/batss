@@ -145,6 +145,10 @@ jobs:
 
   release:
     name: Release
+    # Publish to PyPI ONLY for an actual GitHub Release. A manual "Run workflow"
+    # (workflow_dispatch) then builds every platform WITHOUT publishing — a safe
+    # all-platform build test that never touches PyPI.
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     needs: [linux, musllinux, windows, macos, sdist]
     environment: pypi
