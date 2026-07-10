@@ -127,6 +127,43 @@ cargo tree -i pyo3     # expect a single pyo3 version, contributed by batss + nu
 > **Why this bites at *release* time — the CI `python-version: "3.x"` trap.** The build workflow uses `actions/setup-python` with `python-version: 3.x`, which resolves to the *latest stable* CPython on the runner — and that advances over time. Combined with `maturin build --find-interpreter` (which builds a wheel for **every** interpreter it finds), a runner Python newer than pyo3 supports fails the whole release job on **every** platform, even though nothing in batss changed. This is exactly what threatened v1.0.3: v1.0.0–1.0.2 were released in Aug 2025, before CPython 3.14; by mid-2026 `3.x` resolved to 3.14, which pyo3 0.24 could not build. The fix was moving to pyo3 0.28. Keep pyo3/numpy current (or pin the CI Python) so a new CPython release doesn't silently break publishing.
 
 ## Deploying to PyPI
+
+Releasing is driven by the [GitHub CLI](https://cli.github.com/) (`gh`) plus the two helper scripts in [`scripts/`](scripts/). The manual web-UI steps remain documented under "Doing it by hand" below.
+
+### Install and authenticate `gh` (one time)
+
+```
+# macOS
+brew install gh
+# Debian/Ubuntu  (other distros: https://github.com/cli/cli/blob/trunk/docs/install_linux.md)
+sudo apt install gh
+# Windows
+winget install --id GitHub.cli        # or: choco install gh   /   scoop install gh
+
+gh auth login       # choose GitHub.com + HTTPS
+```
+
+Verify with `gh auth status`. Dispatching a workflow (`gh workflow run`) needs the **workflow** token scope; if a dispatch is rejected with a permissions error, run `gh auth refresh -s workflow`.
+
+### Test that every platform builds — without publishing
+
+```
+scripts/test-build.sh            # dispatch the workflow on main (build-only) and watch it
+scripts/test-build.sh <branch>   # test a different branch
+```
+
+`test-build.sh` fires the workflow via `workflow_dispatch`. Because the publish job is gated on `if: github.event_name == 'release'`, this builds Linux/musllinux/Windows/macOS + sdist and **uploads nothing to PyPI** — no release, no tag. Run it before every release; a platform break is then caught with nothing to clean up.
+
+### Cut a release and publish to PyPI
+
+```
+scripts/release.sh
+```
+
+`release.sh` reads the version from `Cargo.toml` and refuses to proceed unless (a) that version is strictly newer than the latest GitHub release/tag, (b) the tag `vX.Y.Z` does not already exist, and (c) your local `main` matches `origin/main` (so CI builds exactly what you tested). It then asks you to type the tag to confirm, creates the GitHub Release (which triggers the build **and** the PyPI publish), and watches the run. **A published PyPI version cannot be re-uploaded**, so bump `Cargo.toml` first (step 1 under "Doing it by hand").
+
+### Doing it by hand (web UI)
+
 Deploying to the [PyPI website](https://pypi.org/project/batss/) is how users are able to install via `pip install batss`. This is done by a GitHub action in .github/workflows/build_and_publish.yml. It builds binary wheels (so that users do not need a Rust compiler to install) for each major platform and Python version and uploads them to PyPI. This is done automatically whenever there is a new GitHub release. The steps are
 
 1. Bump the version number **in `Cargo.toml` — the only place the version is stored**, e.g., change 1.0.0 to 1.0.1 if the last uploaded version was 1.0.0 (or bump minor or major version numbers if appropriate according to [semantic versioning](https://semver.org/)). For the rest of this section assume the version number is 1.0.1. Then run `cargo update --workspace` to propagate it into `Cargo.lock` (any cargo build also does this automatically) and commit both files. Everything else derives from `Cargo.toml` automatically: `pyproject.toml` declares `dynamic = ["version"]`, [maturin's officially supported way](https://www.maturin.rs/metadata) of using the Rust crate version as the Python package version; `uv.lock` does not record a version for batss (it defers to the dynamic version); `batss.__version__` reads the installed package metadata at runtime; and `doc/conf.py` parses `Cargo.toml` directly.
