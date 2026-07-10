@@ -98,7 +98,33 @@ plus `maturin sdist --out dist` in a separate job. To test locally whether a pla
 
 - **Linux wheels are built inside manylinux Docker containers** (for compatibility with old glibc). Building on a regular Ubuntu machine or WSL still verifies that the code compiles and links on Linux, which is the part that can realistically break — just not the manylinux glibc compliance.
 - `--find-interpreter` builds one wheel per Python interpreter it can find. On CI, `setup-python` guarantees discovery; locally it can fail with "Could not find any interpreters" (e.g., in non-interactive shells, or when your only Python is a venv). If so, point maturin at a specific interpreter instead: `maturin build --release --out dist -i path/to/python`.
-- `rebop` is a **required dependency on all platforms**, including macOS. (History, so nobody reintroduces the old workaround: macOS builds failed with rebop in Aug 2025, so it was feature-gated off there via `--no-default-features`, then removed entirely in v1.0.2. It was re-added afterward and now powers the exact-Gillespie fallback in `simulator_crn.rs`, so building without it is no longer possible.)
+- `rebop` is a **required dependency on all platforms**, including macOS, where it now builds cleanly. batss uses only rebop's pure-Rust exact-Gillespie engine (the fallback in `simulator_crn.rs`), not rebop's own Python bindings, so it is declared `rebop = { version = "0.9.7", default-features = false }` to keep rebop's optional `pyo3` binding **off** — see the next section for why that matters. (History, so nobody reintroduces the old workaround: macOS builds failed with rebop in Aug 2025, so it was feature-gated off there via `--no-default-features`, then removed entirely in v1.0.2; it was re-added for v1.0.3, which building without is no longer possible. The Aug-2025 failure was never definitively diagnosed, but does not reproduce with the current pyo3 0.28 / rebop 0.9.7 stack.)
+
+### Python version support, and the pyo3 / numpy / rebop version coupling
+
+The Rust extension binds to CPython through **pyo3**, and each pyo3 release supports a fixed range of CPython versions. **This is what determines which Python versions batss can build against.** As of this writing batss uses **pyo3 0.28**, which supports **CPython 3.7–3.14**. If you build against a Python *newer* than pyo3's maximum, the build fails early in pyo3's build script with:
+
+```
+error: the configured Python interpreter version (3.NN) is newer than PyO3's maximum supported version (3.MM)
+```
+
+This is not a bug in batss and not specific to any platform — it just means pyo3 is too old for that interpreter.
+
+**Three Rust dependencies are version-coupled and must move together** (in `Cargo.toml`):
+
+- **`pyo3`** — the binding itself; sets the CPython support ceiling.
+- **`numpy`** (the [rust-numpy](https://github.com/PyO3/rust-numpy) crate) — its minor version tracks pyo3's one-to-one (`numpy 0.28` ⇄ `pyo3 0.28`). Keep them on the same minor.
+- **`rebop`** — also binds pyo3, but only through an optional feature. Because batss uses rebop's pure-Rust `gillespie` API, it sets `default-features = false` to keep rebop's `pyo3` binding disabled. If it were enabled, rebop would pull a second pyo3 into the extension, which cannot link. (rebop ≤ 0.9.2 pinned pyo3 as a *required* dependency, which transitively froze batss's pyo3 version and, before mid-2026, capped batss at Python 3.13; rebop ≥ 0.9.7 made pyo3 optional, which is what lets batss pick its own.)
+
+Only **one** pyo3 version may be linked into the extension module, so all three must agree. Verify the resolved graph with:
+
+```
+cargo tree -i pyo3     # expect a single pyo3 version, contributed by batss + numpy only (not rebop)
+```
+
+**To support a newer CPython** (e.g. when a new 3.x ships): bump `pyo3` and `numpy` together to a version whose supported range includes it (see the [pyo3 changelog](https://pyo3.rs/main/changelog)), make sure `rebop` is recent enough to compile against that pyo3, run `cargo update`, then rebuild and run the tests. A pyo3 major bump can require small code changes — consult the [pyo3 migration guide](https://pyo3.rs/main/migration). The 0.24 → 0.28 bump done for v1.0.3, for instance, needed only `Python::with_gil(...)` → `Python::attach(...)` (two call sites) and an explicit `#[pyclass(from_py_object)]` on `SwitchState`.
+
+> **Why this bites at *release* time — the CI `python-version: "3.x"` trap.** The build workflow uses `actions/setup-python` with `python-version: 3.x`, which resolves to the *latest stable* CPython on the runner — and that advances over time. Combined with `maturin build --find-interpreter` (which builds a wheel for **every** interpreter it finds), a runner Python newer than pyo3 supports fails the whole release job on **every** platform, even though nothing in batss changed. This is exactly what threatened v1.0.3: v1.0.0–1.0.2 were released in Aug 2025, before CPython 3.14; by mid-2026 `3.x` resolved to 3.14, which pyo3 0.24 could not build. The fix was moving to pyo3 0.28. Keep pyo3/numpy current (or pin the CI Python) so a new CPython release doesn't silently break publishing.
 
 ## Deploying to PyPI
 Deploying to the [PyPI website](https://pypi.org/project/batss/) is how users are able to install via `pip install batss`. This is done by a GitHub action in .github/workflows/build_and_publish.yml. It builds binary wheels (so that users do not need a Rust compiler to install) for each major platform and Python version and uploads them to PyPI. This is done automatically whenever there is a new GitHub release. The steps are

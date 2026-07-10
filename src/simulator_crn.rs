@@ -295,7 +295,7 @@ pub const HEURISTIC_PROXY: u8 = 1;
 ///
 /// Exposed to Python as a read-only snapshot via `BatchSimulator.switch`; the two config
 /// knobs are also get/set via `BatchSimulator.heuristic` and `.proxy_threshold`.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct SwitchState {
     // --- configuration (selects and tunes the heuristic) ---
@@ -623,7 +623,7 @@ impl BatchSimulator {
         let random_outputs = Vec::new();
         let transition_probabilities = Vec::new();
         let python_code = c_str!(include_str!("sample_coll.py"));
-        let python_module = Python::with_gil(|py| {
+        let python_module = Python::attach(|py| {
             let module: Py<PyModule> =
                 PyModule::from_code(py, python_code, c_str!("sample.py"), c_str!("sample_module"))
                     .unwrap()
@@ -1002,7 +1002,7 @@ impl BatchSimulator {
     /// do arbitrary-precision floating point arithmetic without rolling our own loggamma function.
     pub fn sample_collision_fast_python(&self, r: u64, u: f64, _has_bounds: bool) -> u64 {
         let args = (self.n_including_extra_species, r, self.crn.o, self.crn.g, u);
-        let result = Python::with_gil(|py| -> PyResult<u64> {
+        let result = Python::attach(|py| -> PyResult<u64> {
             let result = self
                 .python_module
                 .getattr(py, "sample_coll")?
