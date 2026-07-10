@@ -165,13 +165,23 @@ jobs:
       # Used to generate artifact attestation
       attestations: write
     steps:
+      # Merge every platform's uploaded artifact into a single dist/ directory.
       - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: 'wheels-*/*'
+          subject-path: 'dist/*'
+      # Publish with the PyPA action (twine under the hood), replacing the deprecated
+      # `maturin upload` (PyO3/maturin#2334, removed in a future maturin). Uses PyPI
+      # Trusted Publishing via the id-token above — same OIDC mechanism as before, so
+      # no PyPI API token is needed and the existing trusted-publisher config still applies.
       - name: Publish to PyPI
-        uses: PyO3/maturin-action@v1
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          command: upload
-          args: --non-interactive --skip-existing wheels-*/*
+          skip-existing: true
+          # Keep the existing attest-build-provenance step as the provenance source;
+          # flip to true later if you also want PEP 740 attestations uploaded to PyPI.
+          attestations: false
