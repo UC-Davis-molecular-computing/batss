@@ -182,22 +182,31 @@ def benchmark_runtimes(
     seed: int = 1,
     overwrite: bool = False,
     heuristic: bool = False,
-    show_progress: bool = True,
+    progress_bar_above_size: int = 1_000_000,
 ) -> None:
     """Time one run to ``spec.benchmark_end_time`` for each (backend, n) and cache to JSON.
 
-    Already-cached (backend, n) pairs are skipped unless ``overwrite=True``
-    (measurements are merged into any existing JSON, one save per point).
-    The first timed run for each backend is preceded by a warm-up run whose
-    time is discarded (rebop's first call in a process is notably slower than
-    subsequent ones). The warm-up runs on the same simulation object as the
-    timed run, which is then rewound to the initial configuration with
-    :meth:`Simulation.reset` so the timed run still simulates ``0..end_time``.
+    Every size in ``pop_sizes`` is always (re)computed -- a specified size is never skipped, even
+    if it is already in the JSON. ``overwrite`` decides only what happens to the *other* sizes:
 
-    ``show_progress`` (default True) toggles batss's live progress bar during each
-    run (the ``timer`` snapshot in :meth:`Simulation.run`). It has no effect on the
-    rebop backend, which has no such bar. The bar's display overhead is included in
-    the timed measurement, so set it False for the least-perturbed timings.
+    * ``overwrite=False`` (default): the existing JSON is loaded first, so sizes not in
+      ``pop_sizes`` are kept and the freshly computed ``pop_sizes`` are merged in (overwriting any
+      old values for those sizes). Use this to refresh specific points while keeping the rest.
+    * ``overwrite=True``: the file is started fresh, so it ends up holding only ``pop_sizes`` and
+      any previously cached sizes are discarded.
+
+    The first timed run for each backend is preceded by a warm-up run whose time is discarded
+    (rebop's first call in a process is notably slower than subsequent ones). The warm-up runs on
+    the same simulation object as the timed run, which is then rewound to the initial configuration
+    with :meth:`Simulation.reset` so the timed run still simulates ``0..end_time``.
+
+    ``progress_bar_above_size`` (default 1_000_000) shows batss's live progress bar (the ``timer``
+    snapshot in :meth:`Simulation.run`) only for ``n >= progress_bar_above_size``. The bar splits a
+    run into ~100 checkpoints whose overhead is charged to the timed measurement -- and only to
+    batss, since rebop has no such bar -- which noticeably inflates fast small-n timings and biases
+    the batss-vs-rebop comparison; above the threshold a run is slow enough that the overhead is
+    negligible and the feedback is worth it. Set it very high to never show the bar, or to 0 to
+    always show it.
     """
     end_time = spec.benchmark_end_time
     data_dir = Path(data_dir)
@@ -207,15 +216,19 @@ def benchmark_runtimes(
     label_width = max((len(_format_pop_size(n)) for n in pop_sizes), default=0)
     for backend in backends:
         path = _runtime_path(data_dir, spec, backend, end_time, proxy=heuristic and backend == "batss")
+        # overwrite=True starts a brand-new file holding only the pop_sizes computed below;
+        # overwrite=False loads the existing file so sizes outside pop_sizes are preserved. Either
+        # way every size in pop_sizes is (re)computed -- a specified size is never skipped.
         data = {} if overwrite else _load_runtime_json(path)
         print(f"benchmarking {spec.name} on {backend} -> {path}", flush=True)
 
         warmed_up = False
         for n in pop_sizes:
             label = f"n={_format_pop_size(n):<{label_width}}"
-            if n in data:
-                print(f"  {label}: cached {data[n]:.4g}s, skipping", flush=True)
-                continue
+
+            # Show the progress bar only for large n, where a run takes long enough to want feedback
+            # and the bar's overhead is negligible; small-n runs stay bar-free for clean timings.
+            show_progress = n >= progress_bar_above_size
 
             if backend == "batss":
                 sim = _batss_sim(spec, n, seed)
@@ -227,8 +240,8 @@ def benchmark_runtimes(
                     # simulator.run() call the bar would sit at 0% until it finished, so when
                     # showing progress we split the run into ~100 checkpoints. This records no
                     # extra history (history_interval is still the full end_time); it only yields
-                    # to refresh the bar, at a small timing cost (hence show_progress=False for
-                    # the cleanest timings).
+                    # to refresh the bar, at a small timing cost (hence the bar is suppressed below
+                    # progress_bar_above_size for the cleanest small-n timings).
                     stopping = end_time / 100 if show_progress else end_time
                     sim.run(end_time, end_time, stopping_interval=stopping, timer=show_progress)
 
