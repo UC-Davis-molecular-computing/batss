@@ -81,7 +81,7 @@ jobs:
         with:
           # abi3 builds ONE forward-compatible wheel against a single interpreter
           # (any CPython >=3.10 works as the build host).
-          python-version: "3.13"
+          python-version: "3.14"
           architecture: ${{ matrix.platform.target }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -118,7 +118,7 @@ jobs:
         with:
           # abi3 builds ONE forward-compatible wheel against a single interpreter
           # (any CPython >=3.10 works as the build host).
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         env:
