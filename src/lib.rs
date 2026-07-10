@@ -1,5 +1,5 @@
 #![feature(f128)]
-#![feature(float_gamma)]
+// #![feature(float_gamma)] // currently unused — commented out to silence the unused-feature warning
 use pyo3::prelude::*;
 
 pub mod simulator_abstract;

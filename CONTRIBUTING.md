@@ -128,7 +128,7 @@ cargo tree -i pyo3     # expect a single pyo3 version, contributed by batss + nu
 
 ## Deploying to PyPI
 
-Releasing is driven by the [GitHub CLI](https://cli.github.com/) (`gh`) plus the two helper scripts in [`scripts/`](scripts/). The manual web-UI steps remain documented under "Doing it by hand" below.
+Releasing is driven by the [GitHub CLI](https://cli.github.com/) (`gh`) plus the helper scripts in [`scripts/`](scripts/) — a Bash version (`.sh`, for macOS/Linux/WSL/Git Bash) and a PowerShell version (`.ps1`, for Windows) of each. The manual web-UI steps remain documented under "Doing it by hand" below.
 
 ### Install and authenticate `gh` (one time)
 
@@ -148,8 +148,10 @@ Verify with `gh auth status`. Dispatching a workflow (`gh workflow run`) needs t
 ### Test that every platform builds — without publishing
 
 ```
-scripts/test-build.sh            # dispatch the workflow on main (build-only) and watch it
-scripts/test-build.sh <branch>   # test a different branch
+scripts/test-build.sh            # bash: dispatch the workflow on main (build-only) and watch it
+scripts/test-build.sh <branch>   # bash: test a different branch
+./scripts/test-build.ps1         # Windows PowerShell equivalent
+./scripts/test-build.ps1 <branch>
 ```
 
 `test-build.sh` fires the workflow via `workflow_dispatch`. Because the publish job is gated on `if: github.event_name == 'release'`, this builds Linux/musllinux/Windows/macOS + sdist and **uploads nothing to PyPI** — no release, no tag. Run it before every release; a platform break is then caught with nothing to clean up.
@@ -157,7 +159,8 @@ scripts/test-build.sh <branch>   # test a different branch
 ### Cut a release and publish to PyPI
 
 ```
-scripts/release.sh
+scripts/release.sh               # bash
+./scripts/release.ps1            # Windows PowerShell equivalent
 ```
 
 `release.sh` reads the version from `Cargo.toml` and refuses to proceed unless (a) that version is strictly newer than the latest GitHub release/tag, (b) the tag `vX.Y.Z` does not already exist, and (c) your local `main` matches `origin/main` (so CI builds exactly what you tested). It then asks you to type the tag to confirm, creates the GitHub Release (which triggers the build **and** the PyPI publish), and watches the run. **A published PyPI version cannot be re-uploaded**, so bump `Cargo.toml` first (step 1 under "Doing it by hand").
