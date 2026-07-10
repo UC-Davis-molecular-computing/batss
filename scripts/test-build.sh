@@ -19,16 +19,23 @@ REF="${1:-main}"
 command -v gh >/dev/null || { echo "error: gh CLI not found — https://cli.github.com/" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "error: gh not authenticated — run: gh auth login" >&2; exit 1; }
 
+# Record the newest existing dispatch run BEFORE triggering. Right after dispatch,
+# GitHub briefly still returns the PREVIOUS run from `gh run list`; watching that
+# (already-finished) run is what makes the script look like it "succeeds instantly".
+# So we wait for a run whose id differs from this pre-dispatch latest.
+before=$(gh run list --workflow="$WORKFLOW" --branch "$REF" --event workflow_dispatch \
+         --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>/dev/null || true)
+
 echo "Dispatching $WORKFLOW on '$REF' (build-only; nothing is published)..."
 gh workflow run "$WORKFLOW" --ref "$REF"
 
-# gh workflow run doesn't return the run id, so poll for the run it just created.
+# Poll until a genuinely NEW run appears (id != the pre-dispatch latest).
 printf 'Locating the new run'
 RID=""
-for _ in $(seq 1 20); do
-  RID=$(gh run list --workflow="$WORKFLOW" --branch "$REF" --event workflow_dispatch \
-        --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
-  [ -n "$RID" ] && break
+for _ in $(seq 1 30); do
+  cur=$(gh run list --workflow="$WORKFLOW" --branch "$REF" --event workflow_dispatch \
+        --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>/dev/null || true)
+  if [ -n "$cur" ] && [ "$cur" != "$before" ]; then RID="$cur"; break; fi
   printf '.'; sleep 2
 done
 echo

@@ -69,18 +69,21 @@ Write-Host "This will create GitHub Release $Tag on origin/main and PUBLISH $Ver
 $confirm = Read-Host "Type the tag ($Tag) to proceed, anything else to abort"
 if ($confirm -ne $Tag) { Write-Host 'Aborted.'; exit 1 }
 
+# --- newest release-triggered run BEFORE creating the release, so we wait for the
+# --- genuinely new one instead of latching onto a prior (already-finished) run ---
+$before = (gh run list --workflow=build_and_publish.yml --event release --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>$null | Out-String).Trim()
+
 # --- create the release (creates tag $Tag at origin/main HEAD) ---
 gh release create $Tag --target main --title $Tag --generate-notes
 if ($LASTEXITCODE -ne 0) { Write-Error 'gh release create failed'; exit 1 }
 Write-Host "Created release $Tag. Watching the build+publish workflow..."
 
 $rid = $null
-for ($i = 0; $i -lt 30; $i++) {
-    $rid = gh run list --workflow=build_and_publish.yml --event release --limit 1 --json databaseId --jq '.[0].databaseId' 2>$null
-    if ($rid) { break }
+for ($i = 0; $i -lt 40; $i++) {
+    $cur = (gh run list --workflow=build_and_publish.yml --event release --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>$null | Out-String).Trim()
+    if ($cur -and $cur -ne $before) { $rid = $cur; break }
     Start-Sleep -Seconds 3
 }
-$rid = "$rid".Trim()
 if (-not $rid) { Write-Warning 'release created but run not found - check the Actions tab.'; exit 0 }
 
 Write-Host "Run: $(gh run view $rid --json url --jq .url)"

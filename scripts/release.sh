@@ -62,15 +62,20 @@ echo "A PyPI version cannot be re-uploaded once published."
 read -rp "Type the tag ($TAG) to proceed, anything else to abort: " CONFIRM
 [ "$CONFIRM" = "$TAG" ] || { echo "Aborted."; exit 1; }
 
+# --- newest release-triggered run BEFORE creating the release, so we wait for the
+# --- genuinely new one instead of latching onto a prior (already-finished) run ---
+before=$(gh run list --workflow=build_and_publish.yml --event release \
+         --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>/dev/null || true)
+
 # --- create the release (creates tag $TAG at origin/main HEAD) ---
 gh release create "$TAG" --target main --title "$TAG" --generate-notes
 echo "Created release $TAG. Watching the build+publish workflow..."
 
 RID=""
-for _ in $(seq 1 30); do
-  RID=$(gh run list --workflow=build_and_publish.yml --event release \
-        --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
-  [ -n "$RID" ] && break
+for _ in $(seq 1 40); do
+  cur=$(gh run list --workflow=build_and_publish.yml --event release \
+        --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>/dev/null || true)
+  if [ -n "$cur" ] && [ "$cur" != "$before" ]; then RID="$cur"; break; fi
   sleep 3
 done
 if [ -z "$RID" ]; then

@@ -20,20 +20,24 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 gh auth status *> $null
 if ($LASTEXITCODE -ne 0) { Write-Error 'gh not authenticated - run: gh auth login'; exit 1 }
 
+# Record the newest existing dispatch run BEFORE triggering. Right after dispatch,
+# gh briefly still returns the PREVIOUS run; watching that already-finished run is
+# what makes the script look like it "succeeds instantly". Wait for a NEW id instead.
+$before = (gh run list --workflow=$Workflow --branch $Ref --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>$null | Out-String).Trim()
+
 Write-Host "Dispatching $Workflow on '$Ref' (build-only; nothing is published)..."
 gh workflow run $Workflow --ref $Ref
 if ($LASTEXITCODE -ne 0) { Write-Error 'workflow dispatch failed'; exit 1 }
 
-# gh workflow run doesn't return the run id, so poll for the run it just created.
+# Poll until a genuinely NEW run appears (id != the pre-dispatch latest).
 Write-Host -NoNewline 'Locating the new run'
 $rid = $null
-for ($i = 0; $i -lt 20; $i++) {
-    $rid = gh run list --workflow=$Workflow --branch $Ref --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId' 2>$null
-    if ($rid) { break }
+for ($i = 0; $i -lt 30; $i++) {
+    $cur = (gh run list --workflow=$Workflow --branch $Ref --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // ""' 2>$null | Out-String).Trim()
+    if ($cur -and $cur -ne $before) { $rid = $cur; break }
     Write-Host -NoNewline '.'; Start-Sleep -Seconds 2
 }
 Write-Host ''
-$rid = "$rid".Trim()
 if (-not $rid) { Write-Error "couldn't find the dispatched run; try: gh run list --workflow=$Workflow"; exit 1 }
 
 Write-Host "Run: $(gh run view $rid --json url --jq .url)"
