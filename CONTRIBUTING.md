@@ -36,12 +36,6 @@ maturin develop --release
 
 Re-run the appropriate command after each change to the Rust code (changes to the Python code in `python/` take effect immediately without recompiling).
 
-> **macOS note:** the `rebop` dependency does not build on macOS, so it is an optional Cargo feature. On macOS, disable the default features:
-> ```
-> maturin develop --no-default-features
-> ```
-> (This mirrors what the CI does for macOS in `.github/workflows/build_and_publish.yml`.)
-
 > **Windows note — "file is being used by another process" (`os error 32`):** if `maturin develop` fails with an error like
 > ```
 > 💥 maturin failed
@@ -59,19 +53,19 @@ Re-run the appropriate command after each change to the Rust code (changes to th
 
 ### Production mode
 
-To produce an optimized, distributable wheel (the same kind uploaded to PyPI, but built for your current platform and Python version), use `maturin build --release`:
+To produce an optimized, distributable wheel (the same kind uploaded to PyPI, but built for your current platform and Python version), use
 
 ```
-maturin build --release
+maturin build -r
 ```
 
 The resulting `.whl` file is written to `target/wheels/`. You can then install it into any environment with, e.g.:
 
 ```
-pip install target/wheels/batss-1.0.2-<platform-tags>.whl
+pip install target/wheels/batss-1.0.3-<platform-tags>.whl
 ```
 
-(replace the filename with the actual one produced). On macOS, add `--no-default-features` here as well.
+(replace the filename with the actual one produced).
 
 Note that for actually publishing to PyPI you do not build wheels manually; that is handled automatically by the GitHub action described in the next section.
 

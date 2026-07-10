@@ -43,8 +43,7 @@ CARGO_TARGET_DIR="$LOCALAPPDATA/batss-cargo-target" maturin develop --release
 - If the copy of the built `.pyd` fails with "used by another process", a **Jupyter kernel with
   `import batss` loaded is holding it** — close the notebook/kernel (or rename the old `.pyd` aside)
   and re-run.
-- Fast type-check without building the extension: `cargo check --lib --release` (a stray `bin`
-  target for a nonexistent `src/main.rs` makes a bare `cargo check` fail — use `--lib`).
+- Fast type-check without building the extension: `cargo check --release`.
 
 Tests: `python -m unittest tests.batss_tests` (plain `unittest`, no pytest).
 
@@ -54,6 +53,6 @@ Tests: `python -m unittest tests.batss_tests` (plain `unittest`, no pytest).
   k-reactant reaction's rate by `volume**(k-1)`, with `volume` defaulting to the total initial
   count. `benchmarking._batss_sim` passes `volume=n` explicitly so initial conditions need not sum
   to `n` (e.g. an initial condition placed on a limit cycle).
-- Rust: run `cargo check --lib --release` before building. Keep the hot `run()` loop allocation-free.
+- Rust: run `cargo check --release` before building. Keep the hot `run()` loop allocation-free.
 - See `CHANGES_2026-07-03.md` for the Gillespie-mode urn-sync fix and `GILLESPIE_SWITCH_LOGIC.md`
   for the mode-switching heuristic and its open questions.

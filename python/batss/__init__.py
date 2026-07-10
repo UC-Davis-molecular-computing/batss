@@ -39,7 +39,7 @@ try:
     __version__ = version("batss")
 except Exception:
     # Fallback for docs builds where package isn't installed
-    __version__ = "1.0.1"
+    __version__ = "1.0.3"
 
 # Import order matters to avoid circular imports
 from batss.crn import *
