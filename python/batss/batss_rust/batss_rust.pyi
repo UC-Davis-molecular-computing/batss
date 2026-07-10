@@ -44,6 +44,19 @@ class Simulator(ABC):
     k_resets: int
     """Number of K resets performed so far (observability; BatchSimulator only, read-only)."""
 
+    heuristic_gillespie_switching: int
+    """
+    Which batch/Gillespie switching heuristic to use (BatchSimulator only): 0 = wall-clock
+    measurement (default), 1 = the simpler reaction-count proxy only. Must be set before
+    :meth:`run`. Slated for removal once a single heuristic is settled on.
+    """
+
+    proxy_threshold: float
+    """
+    Threshold for the reaction-count proxy rule (BatchSimulator only): prefer Gillespie when the
+    expected number of active reactions in the next batch falls below it.
+    """
+
     def run_until_silent(self) -> None:
         """TODO"""
         ...

@@ -141,7 +141,7 @@ that formula.
   schedule + observability). The decision is in `run()`. Tuning constants near the `WDT_*`
   definitions: `WDT_EMA_ALPHA` (0.3), `WDT_OVERRIDE_FACTOR` (4.0), `WDT_PROBE_INTERVAL` (256),
   `WDT_PROBE_INTERVAL_COMMITTED` (8192).
-- **Python control:** `sim.simulator.heuristic = HEURISTIC_PROXY | HEURISTIC_WALLCLOCK`;
+- **Python control:** `sim.simulator.heuristic_gillespie_switching = HEURISTIC_PROXY | HEURISTIC_WALLCLOCK`;
   `sim.simulator.proxy_threshold = <float>`. Constants in `examples/dimerization_benchmarks.py`.
 - **Observability:** `sim.simulator.switch` is a read-only snapshot with per-mode
   `*_wallclock_seconds`, `*_continuous_time`, `*_calls`, plus `mode_switches` and

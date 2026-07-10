@@ -27,6 +27,7 @@ import numpy as np
 import rebop as rb
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from batss.crn import Reaction, Specie
 from batss.simulation import Simulation
@@ -185,10 +186,13 @@ def benchmark_runtimes(
 ) -> None:
     """Time one run to ``spec.benchmark_end_time`` for each (backend, n) and cache to JSON.
 
-    Already-cached (backend, n) pairs are skipped unless ``overwrite=True``.
-    The first timed run for each backend is preceded by a warm-up run whose time
-    is discarded (rebop's first call in a process is notably slower than
-    subsequent ones).
+    Already-cached (backend, n) pairs are skipped unless ``overwrite=True``
+    (measurements are merged into any existing JSON, one save per point).
+    The first timed run for each backend is preceded by a warm-up run whose
+    time is discarded (rebop's first call in a process is notably slower than
+    subsequent ones). The warm-up runs on the same simulation object as the
+    timed run, which is then rewound to the initial configuration with
+    :meth:`Simulation.reset` so the timed run still simulates ``0..end_time``.
 
     ``show_progress`` (default True) toggles batss's live progress bar during each
     run (the ``timer`` snapshot in :meth:`Simulation.run`). It has no effect on the
@@ -215,7 +219,7 @@ def benchmark_runtimes(
 
             if backend == "batss":
                 sim = _batss_sim(spec, n, seed)
-                sim.simulator.heuristic = 1 if heuristic else 0
+                sim.simulator.heuristic_gillespie_switching = 1 if heuristic else 0
 
                 def run() -> None:
                     # A progress bar can only advance when the Python run loop regains control,
@@ -227,16 +231,28 @@ def benchmark_runtimes(
                     # the cleanest timings).
                     stopping = end_time / 100 if show_progress else end_time
                     sim.run(end_time, end_time, stopping_interval=stopping, timer=show_progress)
+
+                def rewind() -> None:
+                    sim.reset()
             elif backend == "rebop":
                 crn, inits = _rebop_crn(spec, n)
 
                 def run() -> None:
                     crn.run(inits, end_time, 1, rng=seed)
+
+                def rewind() -> None:
+                    pass  # every crn.run starts over from inits; nothing to rewind
             else:
                 raise ValueError(f"unknown backend: {backend!r}")
 
             if not warmed_up:
+                # Warm up on the SAME objects the timed run will use, then rewind to the initial
+                # configuration at t=0. The warm-up must share the sim with the timed run (a
+                # throwaway sim would leave the timed object's own first-run costs unpaid), but
+                # Simulation.run's run_until is relative, so without the rewind the timed run
+                # would simulate end_time..2*end_time instead of 0..end_time.
                 run()
+                rewind()
                 warmed_up = True
 
             t0 = time.perf_counter()
@@ -247,6 +263,28 @@ def benchmark_runtimes(
             _save_runtime_json(path, data)
 
 
+def _grow_figure_to_fit_xticks(ax: Axes, max_scale: float = 2.0, step: float = 0.05) -> None:
+    """Grow the figure (both dimensions, so the aspect is preserved) until the x tick labels no
+    longer overlap. A wide molecular-count range shows many decade labels that collide at a fixed
+    figure size; enlarging keeps every label at full font size rather than dropping or shrinking
+    them. With ``bbox_inches='tight'`` on save, only the intrinsic PDF size changes, not the layout.
+    """
+    fig = ax.get_figure()
+    if not isinstance(fig, Figure):  # a SubFigure can't be resized; nothing to do
+        return
+    w0, h0 = fig.get_size_inches()
+    scale = 1.0
+
+    def overlapping() -> bool:
+        fig.canvas.draw()
+        boxes = [t.get_window_extent() for t in ax.get_xticklabels() if t.get_text()]
+        return any(left.x1 > right.x0 for left, right in zip(boxes, boxes[1:]))
+
+    while overlapping() and scale < max_scale:
+        scale += step
+        fig.set_size_inches(w0 * scale, h0 * scale)
+
+
 def plot_runtimes(
     spec: CRNSpec,
     data_dir: str | Path = "data",
@@ -255,12 +293,33 @@ def plot_runtimes(
     figsize: tuple[float, float] = (5, 4),
     ax: Axes | None = None,
     heuristic: bool = False,
+    fontsize: float = 18,
+    title: str | None = None,
+    equal_aspect: bool = False,
+    xtick_step: int | None = None,
 ) -> Axes:
     """Load cached runtimes and overlay them on log-log axes.
 
     If ``pop_sizes`` is given, only those ``n`` values are plotted (useful when
     the JSON cache contains data from earlier runs at larger ``n`` that you
     don't want on this plot). If ``None``, every cached point is plotted.
+
+    ``fontsize`` sets the axis-label/title size (ticks and legend are 2pt
+    smaller); the default is sized for inclusion in a paper at roughly a third
+    of the text width. ``title`` overrides the default plot title; pass ``""``
+    to omit the title entirely.
+
+    ``xtick_step`` is the number of decades between labelled x ticks (1 = every
+    decade, the default). Every decade is labelled; if the labels would overlap at
+    the current size (a wide n range), the figure is grown in both dimensions
+    (keeping its aspect) until they fit, rather than dropping labels or shrinking
+    the font. Pass ``xtick_step=2`` to instead thin to every other decade.
+
+    ``equal_aspect`` gives the log-log axes equal decade lengths on both axes, so
+    an O(n) runtime (rebop) reads as a slope-1 line and an O(sqrt(n)) runtime
+    (batss while it stays in batch mode) as slope-1/2. Pair it with a taller
+    ``figsize`` at the same width; ``bbox_inches='tight'`` trims the surplus so
+    the saved height is whatever equal decades require.
 
     The figure is saved to ``<data_dir>/<spec.name>_runtime_t<end_time>.pdf``.
     """
@@ -271,6 +330,7 @@ def plot_runtimes(
 
     wanted = set(pop_sizes) if pop_sizes is not None else None
     markers = {"batss": "o", "rebop": "^"}
+    all_ns: set[int] = set()
     for backend in backends:
         proxy = heuristic and backend == "batss"
         path = _runtime_path(data_dir, spec, backend, end_time, proxy=proxy)
@@ -280,13 +340,34 @@ def plot_runtimes(
             continue
         ns = sorted(n for n in data if wanted is None or n in wanted)
         ts = [data[n] for n in ns]
+        all_ns.update(ns)
         label = f"{backend} (proxy)" if proxy else backend
         ax.loglog(ns, ts, label=label, marker=markers.get(backend, "o"))
 
-    ax.set_xlabel("initial molecular count")
-    ax.set_ylabel("run time (s)")
-    ax.set_title(f"{spec.name}: run time to simulate t={end_time}")
-    ax.legend(loc="upper left")
+    # Label every decade by default; a wide range that would collide is handled by growing the
+    # figure below (see _grow_figure_to_fit_xticks), not by dropping labels.
+    exps = [e for e in (_pow10_exponent(n) for n in all_ns) if e is not None]
+    if xtick_step is None:
+        xtick_step = 1
+    if exps:
+        ax.set_xticks([10.0**e for e in range(min(exps), max(exps) + 1, xtick_step)])
+
+    ax.set_xlabel("initial molecular count", fontsize=fontsize)
+    ax.set_ylabel("run time (s)", fontsize=fontsize)
+    ax.tick_params(axis="both", which="major", labelsize=fontsize - 2)
+    if title is None:
+        title = f"{spec.name}: run time to simulate t={end_time}"
+    if title:
+        ax.set_title(title, fontsize=fontsize)
+    ax.legend(loc="upper left", fontsize=fontsize - 2)
+
+    if equal_aspect:
+        # On log-log axes 'equal' makes one decade the same physical length on both axes,
+        # so runtime slopes are readable directly. adjustable='box' shrinks the box (not the
+        # data limits) to satisfy it; a tall figure keeps the width and grows the height.
+        ax.set_aspect("equal", adjustable="box")
+
+    _grow_figure_to_fit_xticks(ax)
 
     out_path = data_dir / f"{spec.name}_runtime_t{end_time}.pdf"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -311,6 +392,8 @@ def plot_trajectory(
     ax: Axes | None = None,
     loc: str = "best",
     heuristic: bool = False,
+    fontsize: float = 18,
+    title: str | None = None,
 ) -> Axes:
     """Simulate ``spec`` with ``backend`` at population size ``n`` and plot counts vs time.
 
@@ -328,6 +411,11 @@ def plot_trajectory(
 
     ``species`` is a list of species-name strings to plot; defaults to the
     species named in ``spec.rxns``.
+
+    ``fontsize`` sets the axis-label/title size (ticks and legend are 2pt
+    smaller); the default is sized for inclusion in a paper at roughly half
+    the text width. ``title`` overrides the default plot title; pass ``""``
+    to omit the title entirely.
 
     The figure is saved to
     ``<data_dir>/<spec.name>_trajectory_<backend>_n<n>_t<end_time>.pdf``.
@@ -349,10 +437,11 @@ def plot_trajectory(
             # Force pure batching mode so the active fraction is measured where it is meaningful.
             # The proxy heuristic with threshold 0 never switches to Gillespie: it would require a
             # batch's expected active reaction count to fall below 0, and it is always >= 0.
-            sim.simulator.heuristic = 1
+            sim.simulator.heuristic_gillespie_switching = 1
             sim.simulator.proxy_threshold = 0.0
         else:
-            sim.simulator.heuristic = 1 if heuristic else 0  # must be set BEFORE run(), not after
+            # must be set BEFORE run(), not after
+            sim.simulator.heuristic_gillespie_switching = 1 if heuristic else 0
         sim.run(end_time, end_time / num_samples)
         times = sim.history.index
         counts = {sp: sim.history[sp] for sp in species_to_plot}
@@ -367,8 +456,10 @@ def plot_trajectory(
 
     for sp in species_to_plot:
         ax.plot(times, counts[sp], label=sp)
-    ax.set_xlabel("time")
-    ax.set_ylabel("count")
+    ax.set_xlabel("time", fontsize=fontsize)
+    ax.set_ylabel("count", fontsize=fontsize)
+    ax.tick_params(axis="both", which="major", labelsize=fontsize - 2)
+    ax.yaxis.get_offset_text().set_fontsize(fontsize - 2)
     ax.set_ylim(bottom=0)
 
     handles, labels = ax.get_legend_handles_labels()
@@ -389,14 +480,18 @@ def plot_trajectory(
             linestyle="--",
             color="#d62728",
         )
-        ax2.set_ylabel("fraction of active reactions")
+        ax2.set_ylabel("active fraction", fontsize=fontsize)
+        ax2.tick_params(axis="y", which="major", labelsize=fontsize - 2)
         ax2.set_ylim(0.0, 1.0)
         h2, l2 = ax2.get_legend_handles_labels()
         handles += h2
         labels += l2
 
-    ax.legend(handles, labels, loc=loc)
-    ax.set_title(f"{spec.name}: {backend}, n={n_str}")
+    ax.legend(handles, labels, loc=loc, fontsize=fontsize - 2)
+    if title is None:
+        title = f"{spec.name}: {backend}, n={n_str}"
+    if title:
+        ax.set_title(title, fontsize=fontsize)
 
     out_path = Path(data_dir) / f"{spec.name}_trajectory_{backend}_n{n}_t{end_time}.pdf"
     out_path.parent.mkdir(parents=True, exist_ok=True)

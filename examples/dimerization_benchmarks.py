@@ -14,8 +14,9 @@ from batss.benchmarking import CRNSpec, benchmark_runtimes, plot_runtimes, plot_
 
 DATA_DIR = "data"
 
-# Values for ``sim.simulator.heuristic`` -- which batch/Gillespie switching rule to use. Set e.g.
-# ``sim.simulator.heuristic = HEURISTIC_PROXY`` to A/B-test the simpler rule empirically.
+# Values for ``sim.simulator.heuristic_gillespie_switching`` -- which batch/Gillespie switching
+# rule to use. Set e.g. ``sim.simulator.heuristic_gillespie_switching = HEURISTIC_PROXY`` to
+# A/B-test the simpler rule empirically.
 HEURISTIC_WALLCLOCK = 0  # default: switch by measured wall-clock per unit continuous time
 HEURISTIC_PROXY = 1  # simpler: the original reaction-count rule only (tunable via proxy_threshold)
 

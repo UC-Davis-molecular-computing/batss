@@ -753,7 +753,8 @@ class Simulation:
                 If None, will use the old initial configuration.
         """
         if init_config is None:
-            config = self.configs[0]
+            # configs[0] is stored as int64 by add_config; the Rust reset needs uint.
+            config = np.array(self.configs[0], dtype=np.uint)
         else:
             config = np.zeros(len(self.state_list), dtype=np.uint)
             for k in init_config.keys():

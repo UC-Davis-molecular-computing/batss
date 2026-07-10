@@ -373,6 +373,17 @@ impl SwitchState {
         }
     }
 
+    /// Clear all measured/probe/observability state back to a freshly-constructed value, keeping
+    /// only the user-set configuration (`heuristic`, `proxy_threshold`). Used by
+    /// `SimulatorCRN::reset` so a reused simulator makes the same switching decisions as a fresh one.
+    fn reset(&mut self) {
+        *self = SwitchState {
+            heuristic: self.heuristic,
+            proxy_threshold: self.proxy_threshold,
+            ..SwitchState::new(self.proxy_threshold)
+        };
+    }
+
     /// A mode's estimated cost as wall-clock per unit continuous time: wall EMA / dt EMA (a
     /// dt-weighted average). `true` = Gillespie, `false` = batch. Meaningful only when `has_est`.
     fn wdt(&self, gillespie: bool) -> f64 {
@@ -667,12 +678,12 @@ impl BatchSimulator {
     /// The batch/Gillespie switching heuristic in use: 0 = wall-clock (default), 1 = the simpler
     /// reaction-count proxy only. Settable from Python to A/B-test heuristics empirically.
     #[getter]
-    pub fn heuristic(&self) -> u8 {
+    pub fn heuristic_gillespie_switching(&self) -> u8 {
         self.switch.heuristic
     }
 
     #[setter]
-    pub fn set_heuristic(&mut self, value: u8) {
+    pub fn set_heuristic_gillespie_switching(&mut self, value: u8) {
         self.switch.heuristic = value;
     }
 
@@ -704,6 +715,14 @@ impl BatchSimulator {
         let max_wallclock_milliseconds = (max_wallclock_time * 1_000.0).ceil() as u64;
         let duration = Duration::from_millis(max_wallclock_milliseconds);
         let start_time = Instant::now();
+        // Evaluate silence from the current configuration before the first engine call: a
+        // simulation can start with no enabled reaction at all (e.g. an all-zero initial
+        // condition, where K is reset to 1 and the total count is below the reaction order),
+        // and batch_step cannot sample from such a configuration. The matching check inside
+        // the loop only runs after an engine call.
+        if !(self.active_reaction_probability() > 0.0) {
+            self.silent = true;
+        }
         while self.continuous_time < t_max && start_time.elapsed() < duration {
             if self.silent {
                 // TODO: there should be some more robust behavior here,
@@ -779,8 +798,10 @@ impl BatchSimulator {
             // reaction-count rule; HEURISTIC_WALLCLOCK (default) starts from that rule but lets a
             // measured wall-clock-per-continuous-time (w/dt) comparison override it once the other
             // mode is measured decisively cheaper, probing the other mode occasionally to measure it.
+            // !(p > 0.0) rather than p == 0.0 so that a NaN from any future degenerate
+            // propensity ratio is also treated as silent instead of bypassing the check.
             let active_probability = self.active_reaction_probability();
-            if active_probability == 0.0 {
+            if !(active_probability > 0.0) {
                 self.silent = true;
             }
             let rough_expected_active_reactions_next_batch =
@@ -927,6 +948,15 @@ impl BatchSimulator {
         self.n_including_extra_species = self.n + self.urn.config[self.crn.k];
         self.continuous_time = t;
         self.silent = self.n == 0;
+        // Return to the batch-mode starting state a fresh simulator has. Without this, a reset
+        // called mid-Gillespie would leave `do_gillespie` true with a stale `self.gillespie`
+        // (holding the pre-reset population), and the next run() would assert on the n mismatch.
+        // Clearing the switch measurements too makes the reused simulator's mode decisions match
+        // a freshly-constructed one's (important when reset is used to warm up a benchmark run).
+        self.do_gillespie = false;
+        self.just_started_gillespie = false;
+        self.just_finished_gillespie = false;
+        self.switch.reset();
         Ok(())
     }
 
@@ -1065,6 +1095,13 @@ impl BatchSimulator {
             total_propensity_including_passive_reactions,
             total_propensity_not_including_passive_reactions
         );
+        if total_propensity_including_passive_reactions == 0.0 {
+            // No reaction, active or passive, is enabled: n_including_extra_species < o makes
+            // C(N, o) = 0, e.g. after a batch-mode extinction resets K to 1. The assert above
+            // guarantees the numerator is also 0; return 0 rather than the 0/0 NaN, so callers
+            // (in particular the silence check in `run`) see a real probability.
+            return 0.0;
+        }
         return total_propensity_not_including_passive_reactions / total_propensity_including_passive_reactions;
     }
 
