@@ -48,7 +48,14 @@ REWRITES: list[tuple[re.Pattern[str], str]] = [
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--execute", action="store_true", help="re-execute README.ipynb in place before converting")
+    parser.add_argument(
+        "--execute", action="store_true",
+        help="re-run the simulations: re-execute README.ipynb in place, and regenerate the slider GIFs",
+    )
+    parser.add_argument(
+        "--no-gifs", action="store_true",
+        help="with --execute, skip regenerating the GIFs (they are slow to review and churn every run)",
+    )
     args = parser.parse_args()
 
     if args.execute:
@@ -58,6 +65,16 @@ def main() -> None:
              "--ExecutePreprocessor.timeout=1800", "README.ipynb"],
             cwd=ROOT, check=True,
         )
+        if not args.no_gifs:
+            # Regenerate the GIFs alongside the notebook, so they cannot go stale when the Lotka-Volterra
+            # example changes -- that silent drift is the whole class of bug this script exists to prevent.
+            # Only under --execute, though: the GIFs re-run the simulations, which are not reproducible
+            # (issue #14), so an unconditional rebuild would rewrite a few hundred KB of binary on every
+            # plain conversion. ~12s on top of the notebook's ~100s.
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            import make_readme_gifs
+
+            make_readme_gifs.main()
 
     # nbconvert only overwrites the images for cells that still exist, so stale ones from a previous
     # layout would otherwise linger forever, indistinguishable from live ones.

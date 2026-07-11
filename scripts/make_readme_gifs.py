@@ -2,13 +2,18 @@
 
     python scripts/make_readme_gifs.py
 
+`scripts/make_readme.py --execute` calls this automatically, so you only need to run it directly when
+iterating on the GIFs themselves and you don't want to sit through a full notebook re-execution.
+
 Two cells of README.ipynb produce an ipywidgets slider. A slider cannot survive `nbconvert` (and GitHub
-cannot render a live widget inside a notebook either), so `scripts/make_readme.py` strips the dead widget
-repr and the README embeds one of these GIFs instead, showing what dragging the slider actually looks like.
+cannot render a live widget inside a notebook either), so `make_readme.py` strips the dead widget repr and
+the README embeds one of these GIFs instead, showing what dragging the slider actually looks like.
 
 The GIFs are rendered offscreen with matplotlib's PillowWriter rather than screen-recorded, so regenerating
-them is a single deterministic command. Re-run this only when the Lotka-Volterra example changes; the
-output is committed.
+them is a single command. Note that it re-runs the simulations, and the simulator is not reproducible even
+with a fixed seed (the batch/Gillespie switch decides by measured wall-clock time -- see issue #14), so the
+GIFs come out different every time. That is why `make_readme.py` only regenerates them under `--execute`:
+an unconditional rebuild would rewrite a couple of hundred KB of binary on every conversion.
 """
 
 from __future__ import annotations
@@ -74,8 +79,14 @@ def snapshot_slider_gif() -> None:
     plt.close(snapshot.fig)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Regenerate every GIF in README_files/. Takes about 12 seconds."""
+    print("regenerating README GIFs ...")
     bar_slider_gif()
     snapshot_slider_gif()
     for gif in sorted(OUT.glob("*.gif")):
         print(f"wrote {gif.relative_to(OUT.parent)}  ({gif.stat().st_size / 1024:.0f} KB)")
+
+
+if __name__ == "__main__":
+    main()
