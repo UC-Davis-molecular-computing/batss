@@ -2,7 +2,7 @@
 
 ## Regenerating README.md
 
-**`README.md` is generated. Never edit it by hand — your changes will be overwritten.**
+**`README.md` is generated from a Jupyter notebook. Never edit it by hand; your changes will be overwritten. Instead edit the notebook; details below.**
 
 It is the `nbconvert` output of [`README.ipynb`](README.ipynb), so that every example in the README is
 one a reader can actually download and run, and so the two cannot drift apart (they had, badly, before
@@ -26,9 +26,26 @@ Two things the script handles that are easy to get wrong by hand:
 - **Progress bars and `ipywidgets` sliders are stripped**, since `nbconvert` renders them as a stale text
   repr (a progress bar frozen at `0%|`, or `interactive(children=(IntSlider(...`) that is pure noise in a
   static README.
+- **The `<style>` block that pandas emits with every DataFrame is stripped.** GitHub's sanitizer removes
+  the `<style>` element but then renders its CSS *text* as visible prose, so the raw rules would appear
+  above every table. The `<table>` renders fine without it.
 
-The other notebooks (`examples/`, `benchmark/`) are not converted to markdown; GitHub renders them
-directly. Re-execute them with:
+### The animated GIFs
+
+A slider cannot survive `nbconvert`, and GitHub cannot render a live widget inside a notebook either, so
+where `README.ipynb` builds a slider the README embeds a GIF of that slider being dragged. These are
+rendered offscreen with matplotlib (not screen-recorded), so they regenerate with one command:
+
+```
+python scripts/make_readme_gifs.py
+```
+
+Re-run it only when the Lotka-Volterra example changes; the GIFs are committed, and `make_readme.py`
+leaves them alone.
+
+### Other notebooks
+
+`examples/` and `benchmark/` are not converted to markdown; GitHub renders them directly. Re-execute with:
 
 ```
 python -m jupyter nbconvert --to notebook --execute --inplace examples/crn_examples.ipynb

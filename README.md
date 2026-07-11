@@ -185,8 +185,8 @@ sim.history
     </tr>
     <tr>
       <th>0.04</th>
-      <td>4902957</td>
-      <td>5102584</td>
+      <td>4902822</td>
+      <td>5102570</td>
     </tr>
     <tr>
       <th>...</th>
@@ -195,28 +195,28 @@ sim.history
     </tr>
     <tr>
       <th>9.96</th>
-      <td>16445246</td>
-      <td>18575403</td>
+      <td>16478249</td>
+      <td>18501490</td>
     </tr>
     <tr>
       <th>9.97</th>
-      <td>16586894</td>
-      <td>18454077</td>
+      <td>16617193</td>
+      <td>18381164</td>
     </tr>
     <tr>
       <th>9.98</th>
-      <td>16727608</td>
-      <td>18330929</td>
+      <td>16757114</td>
+      <td>18257799</td>
     </tr>
     <tr>
       <th>9.99</th>
-      <td>16866412</td>
-      <td>18207071</td>
+      <td>16894304</td>
+      <td>18134443</td>
     </tr>
     <tr>
       <th>10.00</th>
-      <td>17004722</td>
-      <td>18081154</td>
+      <td>17030406</td>
+      <td>18008948</td>
     </tr>
   </tbody>
 </table>
@@ -323,8 +323,8 @@ print(small.config_dict)
 ```
 
 
-    extinction at time 1148
-    {R: 33}
+    extinction at time 1154
+    {R: 50}
     
 
 **A word of warning.** Calling `run()` with no arguments runs until the configuration is *silent*, meaning
@@ -370,7 +370,7 @@ print(f'{len(coarse.history)} configurations recorded, '
 ```
 
 
-    1148 configurations recorded, vs 22964 for the fixed interval above
+    902 configurations recorded, vs 23071 for the fixed interval above
     
 
 ## Visualizing a single configuration
@@ -416,6 +416,11 @@ bar = widgets.interact(plot_row, row=widgets.IntSlider(
 ```
 
 
+Dragging that slider walks the barplot through the whole simulation, and the two species visibly take
+turns:
+
+![Lotka-Volterra barplot, scrubbed with an ipywidgets slider](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/lv_bar_slider.gif)
+
 ## Live visualization
 
 Everything above plots *after* the simulation finishes. A `Snapshot` plots *while it runs*: `StatePlotter`
@@ -439,7 +444,7 @@ live.run(20.0, 0.1)
 
 
     
-![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_31_0.png)
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_32_0.png)
     
 
 
@@ -451,6 +456,12 @@ and forwards through the recorded history.
 live.snapshot_slider('time')
 ```
 
+
+![StatePlotter driven by snapshot_slider](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/lv_snapshot_slider.gif)
+
+The difference between this and the previous slider is who is doing the work: there we wrote `plot_row` and
+wired up `ipywidgets` ourselves, whereas here batss redraws every `Snapshot` attached to the simulation, so
+one slider drives them all.
 
 ## Sampling the distribution
 
@@ -479,23 +490,23 @@ samples.describe().loc[['mean', 'std', 'min', 'max']]
   <tbody>
     <tr>
       <th>mean</th>
-      <td>139652.244000</td>
-      <td>39507.468000</td>
+      <td>139688.268000</td>
+      <td>39505.234000</td>
     </tr>
     <tr>
       <th>std</th>
-      <td>1067.444166</td>
-      <td>596.731402</td>
+      <td>1015.495328</td>
+      <td>637.814165</td>
     </tr>
     <tr>
       <th>min</th>
-      <td>136661.000000</td>
-      <td>37474.000000</td>
+      <td>136911.000000</td>
+      <td>37642.000000</td>
     </tr>
     <tr>
       <th>max</th>
-      <td>143227.000000</td>
-      <td>41226.000000</td>
+      <td>141977.000000</td>
+      <td>41401.000000</td>
     </tr>
   </tbody>
 </table>
@@ -509,27 +520,47 @@ p = samples.plot(kind='hist', bins=40, alpha=0.6,
 
 
     
-![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_36_0.png)
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_38_0.png)
     
 
 
 ## Time units
 
 Rate constants usually come with physical units attached. `time_units` — any string that
-`pandas.to_timedelta` accepts, such as `'seconds'` — makes the history index a pandas `TimedeltaIndex`, so
-that plots are labelled in real time.
+`pandas.to_timedelta` accepts, such as `'seconds'` — makes the history index a pandas `TimedeltaIndex`
+rather than a plain float index, so the history carries real units and pandas' time series machinery
+(resampling, and so on) applies to it.
 
 
 ```python
 n = 10 ** 5
 timed = Simulation({r: n // 2, f: n - n // 2}, rxns, time_units='seconds', seed=1)
 timed.run(20.0, 0.05)
-p = timed.history.plot()
+
+timed.history.index[:3]
+```
+
+
+    TimedeltaIndex(['0 days 00:00:00', '0 days 00:00:00.050000',
+                    '0 days 00:00:00.100000'],
+                   dtype='timedelta64[ns]', freq=None)
+
+
+One wrinkle worth knowing about. A pandas `Timedelta` is a *duration*, and it always prints in the form
+`[D days ]HH:MM:SS.fff` — there is no way to ask it to render itself as a plain number of seconds. So the
+tick at two and a half seconds is labelled `00:00:02.5`, not `2.5`, and those ten-character labels are wide
+enough to collide with each other. Rotating them fixes it (batss's own `HistoryPlotter` does the same thing
+whenever `time_units` is set).
+
+
+```python
+ax = timed.history.plot()
+p = ax.tick_params(axis='x', rotation=45)
 ```
 
 
     
-![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_38_1.png)
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_42_0.png)
     
 
 
