@@ -30,10 +30,18 @@ kinetics models used purely as simulation benchmarks.
   [`GILLESPIE_SWITCH_LOGIC.md`](GILLESPIE_SWITCH_LOGIC.md)).
 - **Python API** in [`python/batss/`](python/batss/): `batss.Simulation`, `batss.species("A B")`,
   reactions built with the `>>` / `|` operators and `.k(rate)` (e.g. `(a + b >> 2*b).k(1.5)`),
-  `sim.run(end_time, history_interval)`, `sim.history` (a pandas DataFrame).
-- **Benchmarks/examples** in [`examples/`](examples/): `benchmarking.py` (the reusable `CRNSpec`
-  interface + `plot_trajectory` / `benchmark_runtimes`), `dimerization_benchmarks.py`
-  (`oregonator_spec()`, `dimerization_spec()`, `mode_split()`), and `benchmark.ipynb`.
+  `sim.run(end_time, history_interval)`, `sim.history` (a pandas DataFrame). `convert_to_uniform` pads
+  the CRN with the filler species `K`/`W` to make every reaction uniform; these are simulated but hidden
+  from `history` / `config_dict` (see `Simulation._visible_indices`).
+- **Benchmarks** in [`benchmark/`](benchmark/): `dimerization_benchmarks.py` (`oregonator_spec()`,
+  `dimerization_spec()`, `mode_split()`), `generate_gallery_figures.py` (the authoritative definitions of
+  the 5 benchmark CRNs), `benchmark.ipynb`, and cached runtime JSON in `benchmark/data/` (committed).
+  The reusable `CRNSpec` / `benchmark_runtimes` / `plot_runtimes` / `plot_trajectory` interface lives in
+  [`python/batss/benchmarking.py`](python/batss/benchmarking.py) — **not public API**; keep it out of the
+  user-facing docs.
+- **Docs**: `README.md` is **generated** from `README.ipynb` — never edit it by hand; run
+  `python scripts/make_readme.py` (see [`CONTRIBUTING.md`](CONTRIBUTING.md)). Further usage examples are
+  in [`examples/`](examples/).
 
 ## Key commands
 

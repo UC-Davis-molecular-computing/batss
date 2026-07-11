@@ -3,10 +3,10 @@ batss Documentation
 
 .. currentmodule:: batss
 
-batss is a Python package for simulating population protocols using
-the efficient multibatching algorithm described in this paper:
+batss is a Python package for exact stochastic simulation of chemical reaction
+networks (CRNs), using the batching algorithm described in this paper:
 
-https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ESA.2020.16
+https://arxiv.org/abs/2508.04079
 
 For an introduction, see https://github.com/UC-Davis-molecular-computing/batss#readme
 

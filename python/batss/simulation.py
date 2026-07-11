@@ -31,7 +31,7 @@ from dataclasses import dataclass
 import math
 from time import perf_counter
 from typing import Callable, Iterable, Any, cast, TypeAlias, TypeVar
-from collections.abc import Hashable
+from collections.abc import Hashable, Sequence
 from natsort import natsorted
 import numpy as np
 import numpy.typing as npt
@@ -160,9 +160,19 @@ class Simulation:
     column_names: pd.MultiIndex | list[str]
     """
     Columns representing all states for pandas dataframe.
-    If the State is a tuple, NamedTuple, or dataclass, this will be a
-    pandas MultiIndex based on the various fields.
-    Otherwise it is list of str(State) for each State.
+    For a CRN this is the list of species names the user declared (the filler species K and W are
+    excluded; see :data:`Simulation._visible_indices`).
+    Otherwise, if the State is a tuple, NamedTuple, or dataclass, this will be a
+    pandas MultiIndex based on the various fields, and otherwise a list of str(State) for each State.
+    """
+
+    _visible_indices: list[int] | None
+    """
+    Indices into :data:`Simulation.state_list` of the species the user declared, i.e. all of them except
+    the filler species K and W that :func:`batss.crn.convert_to_uniform` adds.
+
+    Used by :meth:`Simulation.visible_configs` to strip K and W from every user-facing DataFrame.
+    ``None`` when not in CRN mode, meaning no columns are hidden.
     """
 
     snapshots: list[Snapshot]
@@ -357,11 +367,15 @@ class Simulation:
         if simulator_method.lower() == "crn":
             if volume is None:
                 volume = self.n
+            # Default to continuous time for CRNs if not specified by the user.
+            if continuous_time is None:
+                self.continuous_time = True
             # Build a CRN and modify it to make all reactions uniform in order and generativity.
             crn = CRN(list(rule), self.state_list)  # type: ignore
             self._crn = convert_to_uniform(crn, volume)
-            # TODO we probably want to keep track of these separately, because we don't want to
-            # report the counts of K and W to the end user, typically.
+            # The uniform CRN needs the filler species K and W, so they join state_list and are simulated
+            # like any other species. They are stripped back out wherever a user-facing DataFrame is built
+            # (see self._visible_indices), so the user never sees them.
             self.state_list = natsorted(state_list, key=lambda x: repr(x)) + extra_species()
             self.state_dict = {state: i for i, state in enumerate(self.state_list)}
 
@@ -372,33 +386,65 @@ class Simulation:
         self._transition_order = transition_order
         self.initialize_simulator(self.array_from_dict(init_config))
 
-        # Check an arbitrary state to see if it has fields.
-        # This will be true for either a tuple, NamedTuple, or dataclass.
-        state = next(iter(init_config.keys()))
-        field_names: None | list[str]
-        # Check for dataclass.
-        if dataclasses.is_dataclass(state):
-            field_names = [field.name for field in dataclasses.fields(state)]  # noqa
-            tuples = [dataclasses.astuple(state) for state in self.state_list]  # type: ignore
+        if simulator_method.lower() == "crn":
+            # Specie is a two-field dataclass, so the generic path below would build a MultiIndex
+            # (name, is_special_specie), making sim.history['R'] a DataFrame and plot legends read
+            # "('R', False)". Species names are the natural column labels for a CRN. The filler species
+            # K and W are dropped: K is pinned at n and W is recycled to 0 after every batch, so they
+            # carry no information for the user.
+            self._visible_indices = [
+                i for i, s in enumerate(self.state_list) if not getattr(s, "is_special_specie", False)
+            ]
+            self.column_names = [str(self.state_list[i]) for i in self._visible_indices]
         else:
-            # Check for NamedTuple.
-            field_names = getattr(state, "_fields", None)
-            tuples = self.state_list
-        # Check also for tuple.
-        if (field_names is not None and len(field_names) > 1) or (isinstance(state, tuple) and len(state) > 1):
-            # Make a MultiIndex only if there are multiple fields
-            self.column_names = pd.MultiIndex.from_tuples(tuples, names=field_names)  # type: ignore
-        else:
-            self.column_names = [str(i) for i in self.state_list]
+            # Check an arbitrary state to see if it has fields.
+            # This will be true for either a tuple, NamedTuple, or dataclass.
+            self._visible_indices = None
+            state = next(iter(init_config.keys()))
+            field_names: None | list[str]
+            # Check for dataclass.
+            if dataclasses.is_dataclass(state):
+                field_names = [field.name for field in dataclasses.fields(state)]  # noqa
+                tuples = [dataclasses.astuple(state) for state in self.state_list]  # type: ignore
+            else:
+                # Check for NamedTuple.
+                field_names = getattr(state, "_fields", None)
+                tuples = self.state_list
+            # Check also for tuple.
+            if (field_names is not None and len(field_names) > 1) or (isinstance(state, tuple) and len(state) > 1):
+                # Make a MultiIndex only if there are multiple fields
+                self.column_names = pd.MultiIndex.from_tuples(tuples, names=field_names)  # type: ignore
+            else:
+                self.column_names = [str(i) for i in self.state_list]
         self.configs = []
         self.times = []
         self.time = 0.0
         self.add_config()
         # private history dataframe is initially empty, updated by the getter of property self.history
         self._history = pd.DataFrame(
-            data=self.configs, index=pd.Index(self.times_in_units(self.times)), columns=self.column_names
+            data=self.visible_configs(self.configs),
+            index=pd.Index(self.times_in_units(self.times)),
+            columns=self.column_names,
         )
         self.snapshots = []
+
+    def visible_configs(self, configs: Sequence[npt.NDArray]) -> list[npt.NDArray] | Sequence[npt.NDArray]:
+        """Project full-width configuration arrays onto the species the user declared.
+
+        Configurations are stored full-width in :data:`Simulation.configs` because they are fed back into
+        the simulator (by :meth:`Simulation.reset`, :meth:`Simulation.sample_future_configuration` and
+        unpickling), which needs the filler species K and W. This drops those columns on the way out, so
+        every user-facing DataFrame shows only the species that were actually specified.
+
+        Args:
+            configs: full-width configuration arrays, ordered by :data:`Simulation.state_list`.
+
+        Returns:
+            The same configurations restricted to the user's species, or unchanged if not in CRN mode.
+        """
+        if self._visible_indices is None:
+            return configs
+        return [np.asarray(config)[self._visible_indices] for config in configs]
 
     def rule(self, a: State, b: State) -> Output:
         """The rule, as a function of two input states."""
@@ -612,15 +658,32 @@ class Simulation:
         if self.silent() or stop_condition():
             return
 
+        # The history schedule is a running sum of history_interval, one term per recorded configuration.
+        # Accumulating it with a plain `t += interval` lets rounding error build up over thousands of
+        # steps: with end_time=10 and history_interval=0.01 the sum drifts a few ulps below 10, so the
+        # final configuration looks later than the last scheduled one and gets recorded twice. Carry a
+        # Neumaier compensation term instead, which is O(1) per step and keeps the sum correctly rounded.
+        # (math.fsum would also work, but only by re-summing the whole schedule each time, which is
+        # quadratic in the number of recorded configurations.)
+        history_sum = self.time
+        history_compensation = 0.0
+
         def get_next_history_time():
             # Get the next time that will be recorded to self.times and self.history
+            nonlocal history_sum, history_compensation
             if callable(history_interval):
                 length = history_interval(self.time)
             else:
                 length = history_interval
             if length <= 0:
                 raise ValueError("history_interval must always be strictly positive.")
-            return self.time + length
+            total = history_sum + length
+            if abs(history_sum) >= abs(length):
+                history_compensation += (history_sum - total) + length
+            else:
+                history_compensation += (length - total) + history_sum
+            history_sum = total
+            return history_sum + history_compensation
 
         if stopping_interval <= 0:
             raise ValueError("stopping_interval must always be strictly positive.")
@@ -703,11 +766,14 @@ class Simulation:
     @property
     def reactions(self) -> str:
         """
-        A string showing all active transitions in reaction notation.
+        A string showing the reactions of the CRN, one per line.
 
-        Each reaction is separated by newlines, so that ``print(self.reactions)`` will display all reactions.
-        Only works with simulator method multibatch, otherwise will raise a ValueError.
+        These are the reactions as written, so ``print(sim.reactions)`` is a quick way to confirm that
+        batss parsed them as intended. (The uniform reactions actually simulated, padded with the filler
+        species K and W, are an implementation detail; see :func:`batss.crn.convert_to_uniform`.)
         """
+        if self.simulator_method.lower() == "crn":
+            return "\n".join(str(reaction) for reaction in self._crn.reactions)
         w = max([len(str(state)) for state in self.state_list])
         reactions = [
             self._reaction_string(r, p, w)
@@ -724,6 +790,8 @@ class Simulation:
         Each reaction is separated by newlines, so that ``print(self.enabled_reactions)``
         will display all enabled reactions.
         """
+        if self.simulator_method.lower() == "crn":
+            raise NotImplementedError("enabled_reactions is not available in CRN mode; use reactions instead")
         w = max([len(str(state)) for state in self.state_list])
         self.simulator.get_enabled_reactions()
 
@@ -763,7 +831,9 @@ class Simulation:
         self.times = [0]
         self.time = 0
         self._history = pd.DataFrame(
-            data=self.configs, index=pd.Index(self.times, name="time"), columns=self._history.columns
+            data=self.visible_configs(self.configs),
+            index=pd.Index(self.times, name="time"),
+            columns=self._history.columns,
         )
         self.simulator.reset(config)
 
@@ -802,12 +872,16 @@ class Simulation:
     @property
     def config_dict(self) -> dict[State, int]:
         """
-        The current configuration, as a dictionary mapping states to counts.
+        The current configuration, as a dictionary mapping states to counts, omitting zero counts.
+
+        For a CRN the filler species K and W are excluded, just as they are from
+        :data:`Simulation.history`, so a convergence detector passed to :meth:`Simulation.run` sees only
+        the species that were declared. Use :data:`Simulation.config_array` for the full-width counts.
         """
-        # return {self.state_list[i]: self.simulator.config[i] for i in np.nonzero(self.simulator.config)[0]}
+        visible = self._visible_indices if self._visible_indices is not None else range(len(self.simulator.config))
         return {
             self.state_list[state_idx]: self.simulator.config[state_idx]
-            for state_idx in range(len(self.simulator.config))
+            for state_idx in visible
             if self.simulator.config[state_idx] > 0
         }
 
@@ -827,7 +901,7 @@ class Simulation:
         h = len(self._history)
         if h < len(self.configs):
             new_history = pd.DataFrame(
-                data=self.configs[h:],
+                data=self.visible_configs(self.configs[h:]),
                 index=pd.Index(self.times_in_units(self.times[h:])),
                 columns=self._history.columns,
             )
@@ -946,7 +1020,9 @@ class Simulation:
                 self.simulator.run(end_step)
                 samples.append(np.array(self.simulator.config))
         return pd.DataFrame(
-            data=samples, index=pd.Index(range(num_samples), name="trial #"), columns=self._history.columns
+            data=self.visible_configs(samples),
+            index=pd.Index(range(num_samples), name="trial #"),
+            columns=self._history.columns,
         )
 
     def __getstate__(self):
@@ -954,7 +1030,9 @@ class Simulation:
         # Clear _history such that it can be regenerated by self.history
         d = dict(self.__dict__)
         d["_history"] = pd.DataFrame(
-            data=self.configs[0:1], index=pd.Index(self.times_in_units(self.times[0:1])), columns=self._history.columns
+            data=self.visible_configs(self.configs[0:1]),
+            index=pd.Index(self.times_in_units(self.times[0:1])),
+            columns=self._history.columns,
         )
         del d["simulator"]
         return d

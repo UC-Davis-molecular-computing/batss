@@ -268,6 +268,10 @@ class Specie:
     def __str__(self) -> str:
         return self.name
 
+    # The dataclass-generated repr ("Specie(name='F', is_special_specie=False)") makes anything holding
+    # species unreadable, e.g. printing Simulation.config_dict. The name is the useful identifier.
+    __repr__ = __str__
+
     def __lt__(self, other: object) -> bool:
         if not isinstance(other, Specie):
             return NotImplemented
@@ -650,10 +654,22 @@ class CRN:
     """
 
     reactions: list[Reaction]
-    """The reactions comprising the CRN."""
+    """The reactions comprising the CRN, as written by the user.
+
+    These are never rewritten by :func:`convert_to_uniform`, so they remain a faithful record of what
+    was specified. :data:`CRN.reactions_modified` holds the reactions actually simulated.
+    """
 
     species: list[Specie]
     """The species in the CRN. Ordered by index that represents them during algorithm execution."""
+
+    reactions_modified: list[Reaction] | None = None
+    """The uniform reactions actually simulated, produced by :func:`convert_to_uniform`.
+
+    Every reaction here has the same number of reactants and the same number of products, achieved by
+    padding with the catalyst species K and the waste species W, and rate constants have been divided by
+    ``volume ** (order - 1)``. ``None`` until :func:`convert_to_uniform` has been applied.
+    """
 
     def __str__(self) -> str:
         return str([str(rxn) for rxn in self.reactions])
@@ -661,32 +677,38 @@ class CRN:
     def order(self) -> int:
         """
         Returns: the order of the CRN, the greatest number of reactants in any reaction
+
+        Reversible reactions are counted in both directions: the reverse direction of ``2M <--> D`` has
+        one reactant but two products, so it is the *expanded* reactions that determine the order.
         """
-        return max(rxn.num_reactants() for rxn in self.reactions)
+        return max(rxn.num_reactants() for rxn in replace_reversible_rxns(self.reactions))
 
     def generativity(self) -> int:
         """
         Returns: the generativity of the CRN, the greatest number of
         products minus reactants in any reaction
+
+        As with :meth:`CRN.order`, reversible reactions are counted in both directions.
         """
-        return max(rxn.generativity() for rxn in self.reactions)
+        return max(rxn.generativity() for rxn in replace_reversible_rxns(self.reactions))
 
     def exportable_reactions(self) -> list[tuple[list[int], list[int], float]]:
         """
         Returns: the reactions of the CRN formatted in a way that can be passed through pyo3.
-        """
-        reactions: list[tuple[list[int], list[int], float]] = []
-        all_species: set[Specie] = set()
-        for reaction in self.reactions:
-            all_species.update(reaction.reactants.get_species())
-            all_species.update(reaction.products.get_species())
-        species_to_index: dict[Specie, int] = {}
 
+        Uses :data:`CRN.reactions_modified`: the simulator requires the uniform (K/W-padded) reactions,
+        not the ones the user wrote.
+        """
+        if self.reactions_modified is None:
+            raise ValueError("exportable_reactions() requires a uniform CRN; call convert_to_uniform first")
+
+        species_to_index: dict[Specie, int] = {}
         for i in range(len(self.species)):
             specie = self.species[i]
             species_to_index[specie] = i
 
-        for reaction in self.reactions:
+        reactions: list[tuple[list[int], list[int], float]] = []
+        for reaction in self.reactions_modified:
             reactants = list(map(lambda species: species_to_index[species], reaction.reactants.species))
             products = list(map(lambda species: species_to_index[species], reaction.products.species))
             reactions.append((reactants, products, reaction.rate_constant))
@@ -704,6 +726,9 @@ def convert_to_uniform(crn: CRN, volume: float) -> CRN:
     The new CRN will have two new species, K (catalyst) and W (waste).
     This function does NOT adjust rate constants for the count of K; this is done later.
 
+    The returned CRN keeps the user's original reactions in :data:`CRN.reactions` (copied before any
+    transformation) and puts the padded, uniform reactions in :data:`CRN.reactions_modified`.
+
     Args:
         crn: a CRN to be converted. Should not be an output of this function.
         volume: volume of the CRN.
@@ -711,6 +736,8 @@ def convert_to_uniform(crn: CRN, volume: float) -> CRN:
     # Special species are added by this function, so there shouldn't be any yet.
     for specie in crn.species:
         assert not specie.is_special_specie
+    # Snapshot the user's reactions before transforming, so they survive as a faithful record.
+    original_reactions = copy.deepcopy(crn.reactions)
     max_generativity = crn.generativity()
     max_order = crn.order()
     new_reactions: list[Reaction] = []
@@ -727,7 +754,7 @@ def convert_to_uniform(crn: CRN, volume: float) -> CRN:
         new_k = reaction.rate_constant / volume ** (reaction_order - 1)
         new_reactions.append(Reaction(reactants=new_reactants, products=new_products, k=new_k))
 
-    return CRN(reactions=new_reactions, species=new_species)
+    return CRN(reactions=original_reactions, species=new_species, reactions_modified=new_reactions)
 
 
 def catalyst_specie() -> Specie:

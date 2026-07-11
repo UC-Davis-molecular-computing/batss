@@ -145,6 +145,16 @@ class TimeUpdate(Snapshot):
         self.pbar.update(new_n - self.pbar.n)
 
 
+def _hide_internal_species(state: Hashable) -> Any:
+    """Default :data:`Plotter.state_map`: the state itself, except that a CRN's filler species are dropped.
+
+    A state_map returning None drops that state from the plot. The filler species K and W added by
+    :func:`batss.crn.convert_to_uniform` are an implementation detail of the batching algorithm, so they
+    are hidden by default, just as :data:`batss.simulation.Simulation.history` hides them.
+    """
+    return None if getattr(state, "is_special_specie", False) else state
+
+
 @dataclass
 class Plotter(Snapshot):
     """
@@ -202,7 +212,8 @@ class Plotter(Snapshot):
 
         Args:
             state_map: An optional function mapping states to categories.
-                If None, then the state itself will be used as the category.
+                If None, then the state itself will be used as the category, except that the filler
+                species K and W of a CRN are dropped (a state_map returning None drops that state).
             update_time: How many seconds will elapse between calls to update while
                 :class:`batss.simulation.Simulation.run` method.
             yscale: The scale used for the yaxis, passed into ax.set_yscale.
@@ -210,8 +221,10 @@ class Plotter(Snapshot):
         """
         super().__init__(update_time)
         self._matrix = None
-        # identity function for state_map if not specified; i.e., the catagories are the states themselves
-        self.state_map = state_map if state_map is not None else lambda x: x
+        # If no state_map is given, categories are the states themselves -- except that a CRN's filler
+        # species K and W are dropped, matching Simulation.history, which also hides them. getattr keeps
+        # this safe for population-protocol states, which have no is_special_specie attribute.
+        self.state_map = state_map if state_map is not None else _hide_internal_species
         self.yscale = yscale
 
     def _update_categories_and_matrix(self) -> None:
@@ -294,10 +307,14 @@ class HistoryPlotter(Plotter):
         assert self.ax is not None
         self.ax.clear()
         if self._matrix is not None:
+            # _matrix has one row per state in state_list, so it must be multiplied against the
+            # full-width configurations. Simulation.history is narrower for a CRN (it hides the filler
+            # species K and W), so use Simulation.configs, which is always full-width.
+            history = self.simulation.history
             df = pd.DataFrame(
-                data=np.matmul(self.simulation.history.to_numpy(), self._matrix),
+                data=np.matmul(np.array(self.simulation.configs), self._matrix),
                 columns=self.categories,
-                index=self.simulation.history.index,
+                index=history.index,
             )
         else:
             df = self.simulation.history

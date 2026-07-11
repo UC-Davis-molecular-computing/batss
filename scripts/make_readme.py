@@ -1,0 +1,96 @@
+"""Regenerate README.md from README.ipynb.
+
+    python scripts/make_readme.py              # convert only (notebook must already be executed)
+    python scripts/make_readme.py --execute    # re-execute the notebook in place first, then convert
+
+README.md is the *verbatim* nbconvert output of README.ipynb, with relative links rewritten to absolute
+GitHub URLs. Never edit README.md by hand: edit README.ipynb, run it, and regenerate.
+
+Why the link rewriting is necessary: pyproject.toml sets ``readme = "README.md"``, so this file becomes the
+PyPI long description, and PyPI cannot resolve repo-relative paths. Note that images must be served from
+raw.githubusercontent.com -- a github.com/.../blob/... URL returns an HTML page, not the image, so it will
+not render.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+REPO = "UC-Davis-molecular-computing/batss"
+BRANCH = "main"
+
+RAW = f"https://raw.githubusercontent.com/{REPO}/{BRANCH}"  # serves file *content* (images)
+BLOB = f"https://github.com/{REPO}/blob/{BRANCH}"  # serves a rendered *page* (notebooks, source)
+
+# Applied in order to the markdown nbconvert emits.
+REWRITES: list[tuple[re.Pattern[str], str]] = [
+    # Images and other raw assets: README_files/foo.png -> raw.githubusercontent.com/...
+    (re.compile(r"\]\(README_files/"), f"]({RAW}/README_files/"),
+    # Files that should render as a page rather than download as raw text.
+    (re.compile(r"\]\((examples/[^)\s]+|benchmark/[^)\s]+|CONTRIBUTING\.md|LICENSE)\)"), rf"]({BLOB}/\1)"),
+]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--execute", action="store_true", help="re-execute README.ipynb in place before converting")
+    args = parser.parse_args()
+
+    if args.execute:
+        print("executing README.ipynb ...")
+        subprocess.run(
+            [sys.executable, "-m", "jupyter", "nbconvert", "--to", "notebook", "--execute", "--inplace",
+             "--ExecutePreprocessor.timeout=1800", "README.ipynb"],
+            cwd=ROOT, check=True,
+        )
+
+    # nbconvert only overwrites the images for cells that still exist, so stale ones from a previous
+    # layout would otherwise linger forever, indistinguishable from live ones.
+    for stale in (ROOT / "README_files").glob("README_*.png"):
+        stale.unlink()
+
+    print("converting README.ipynb -> README.md ...")
+    subprocess.run(
+        [sys.executable, "-m", "jupyter", "nbconvert", "--to", "markdown", "README.ipynb"],
+        cwd=ROOT, check=True,
+    )
+
+    readme = ROOT / "README.md"
+    md = readme.read_text(encoding="utf-8")
+
+    # tqdm redraws a progress bar by overwriting the line with \r; keep only the final frame.
+    md = re.sub(r"[^\n]*\r(?!\n)", "", md)
+
+    # Drop outputs that only make sense in a live notebook. A tqdm progress bar and an ipywidgets slider
+    # are useful when running the notebook, but nbconvert renders them as a stale text repr -- a progress
+    # bar frozen at "0%|", or "interactive(children=(IntSlider(...". Both are pure noise in the README.
+    for junk in (
+        r"^[ \t]*\d+%\|[^\n]*\n",  # tqdm:  0%|          | 0/10.0 [00:00<?, ? time simulated/s]
+        r"^[ \t]*\d+ time simulated \[[^\n]*\n",  # tqdm, before the first update
+        r"^[ \t]*interactive\(children=\([^\n]*\n",  # ipywidgets slider repr
+    ):
+        md = re.sub(junk, "", md, flags=re.MULTILINE)
+    md = re.sub(r"\n{4,}", "\n\n\n", md)  # collapse the blank runs those leave behind
+
+    for pattern, replacement in REWRITES:
+        md = pattern.sub(replacement, md)
+
+    # Fail loudly rather than shipping a README that is broken on PyPI or still refers to the old package.
+    if "ppsim" in md:
+        raise SystemExit("ERROR: a 'ppsim' reference survived into README.md")
+    leftover = re.findall(r"\]\((README_files/|examples/|benchmark/)[^)\s]*\)", md)
+    if leftover:
+        raise SystemExit(f"ERROR: relative link(s) survived into README.md, which PyPI cannot resolve: {leftover}")
+
+    readme.write_text(md, encoding="utf-8", newline="\n")
+    images = sorted(p.name for p in (ROOT / "README_files").glob("README_*.png"))
+    print(f"wrote README.md ({len(md):,} chars) and {len(images)} image(s) in README_files/")
+
+
+if __name__ == "__main__":
+    main()

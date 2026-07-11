@@ -1,98 +1,560 @@
 # batss Python package
 
-The `batss` package (batched stochastic simulator) is used for simulating stochastic chemical reaction networks (CRNs). The package and further example notebooks can be found on [Github](https://github.com/UC-Davis-molecular-computing/batss).
+The `batss` package (**bat**ched **s**tochastic **s**imulator) simulates stochastic chemical reaction
+networks (CRNs). The package and further example notebooks can be found on
+[Github](https://github.com/UC-Davis-molecular-computing/batss).
 
 If you find batss useful in a scientific project, please cite its associated paper:
 
 > <ins>Exactly simulating stochastic chemical reaction networks in sub-constant time per reaction</ins>.  
-  Joshua Petrack and David Doty.
+  Joshua Petrack and David Doty.  
   preprint  
-  [ [paper](https://arxiv.org/abs/2508.04079) | [BibTeX](README_files/bibtex.txt) ]
+  [ [paper](https://arxiv.org/abs/2508.04079) | [BibTeX](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/bibtex.txt) ]
 
-The core of the simulator is inspired by a [batching algorithm](https://arxiv.org/abs/2005.03584) for population protocols (chemical reaction networks with exactly two reactants and two products per reaction) that gives significant asymptotic gains for protocols with relatively small reachable state sets. It adapts this for general CRNs. The package is designed to be run in a Python notebook, to concisely describe complex protocols, efficiently simulate their dynamics, and provide helpful visualization of the simulation.
+Most stochastic CRN simulators use the Gillespie algorithm, which simulates one reaction at a time, so the
+work needed to simulate a fixed span of time grows linearly with the population size $n$. batss instead uses
+a *batching* algorithm — inspired by a [batching algorithm](https://arxiv.org/abs/2005.03584) for population
+protocols and adapted to general CRNs — that samples many reactions at once, taking sub-constant time per
+reaction. This makes large populations (billions of molecules, and beyond) practical. It falls back to
+Gillespie whenever that would be faster, so it is never much slower.
+
+Crucially, batching is **exact**, not an approximation: it samples from precisely the same distribution as
+the Gillespie algorithm, unlike approximate methods such as tau-leaping.
+
+The package is designed to be used in a Python notebook, to concisely describe a CRN, efficiently simulate
+its dynamics, and help visualize the result. This notebook is the source of
+[README.md](https://github.com/UC-Davis-molecular-computing/batss#readme) — you can download it and run
+every example below.
 
 ## Table of contents
 
 * [Installation](#installation)
-* [First example CRN](#first-example-crn)
-<!-- * [Larger state protocol](#larger-state-protocol)
-* [Protocol with Multiple Fields](#protocol-with-multiple-fields)
-* [Simulating Chemical Reaction Networks (CRNs)](#simulating-chemical-reaction-networks-crns) -->
+* [Describing a CRN](#describing-a-crn)
+* [Simulating](#simulating)
+* [Plotting the history](#plotting-the-history)
+* [Larger populations](#larger-populations)
+* [Running until a condition](#running-until-a-condition)
+* [Long runs and log-spaced sampling](#long-runs-and-log-spaced-sampling)
+* [Visualizing a single configuration](#visualizing-a-single-configuration)
+* [Live visualization](#live-visualization)
+* [Sampling the distribution](#sampling-the-distribution)
+* [Time units](#time-units)
+* [More examples](#more-examples)
 
 ## Installation
 
 The package can be installed with `pip` via
 
-
 ```bash
 pip install batss
 ```
 
-## First example CRN
+## Describing a CRN
 
-We will show how to simulate the Lotka-Volterra oscillator,
+We will use the [Lotka-Volterra](https://en.wikipedia.org/wiki/Lotka%E2%80%93Volterra_equations)
+predator-prey oscillator as a running example: rabbits $R$ breed, foxes $F$ eat rabbits and breed, and foxes
+starve.
 
 $$\begin{aligned}
 R &\to 2R,\\
 R + F &\to 2F,\\
-F &\to \emptyset,
+F &\to \emptyset.
 \end{aligned}$$
 
-with all rate constants 1.
+Start by declaring the species. `species` takes a whitespace-separated string of names and returns one
+object per name.
 
-Within python, begin by importing batss. To specify your species, use the `species` function:
 
 ```python
-import batss
-r,f = batss.species('R F')
+from batss import species, Simulation
+
+r, f = species('R F')
 ```
 
-batss overloads operators to allow reactions to be specified in a way visually similar to the way they are typically notated. In this case,
+batss overloads Python's operators so that a reaction looks like a reaction: `>>` separates reactants from
+products, `+` combines species, `2*r` gives a stoichiometric coefficient, and `None` on the product side
+means the reaction has no products ($\emptyset$).
+
 
 ```python
 rxns = [
-    (r+f >> 2*f),
-    (r >> 2*r),
-    (f >> None),
+    r >> 2*r,
+    r + f >> 2*f,
+    f >> None,
 ]
+
+for rxn in rxns:
+    print(rxn)
 ```
 
-Each line creates a reaction by specifying the reactants and products. Rate constants default to 1; they can be specified inline, e.g. the first reaction's rate constant could be set to 0.5 by replacing the first reaction line with
+    R -->(1.0) R + R
+    R + F -->(1.0) F + F
+    F -->(1.0) 
+    
+
+Rate constants default to 1. `.k(...)` sets the rate constant, `|` makes a reaction reversible, and
+`.r(...)` sets the reverse rate constant. These chain, so the reversible reaction
+$A + B \underset{4}{\overset{0.5}{\rightleftharpoons}} 2C$ is written as follows. (This one is just an
+illustration; we go back to Lotka-Volterra below.)
+
 
 ```python
-(r+f >> 2*f).k(0.5),
-``` 
+a, b, c = species('A B C')
 
-Next, specify initial molecular counts and create a `Simulation` object. The `Simulation` class is the most important object in the module, responsible for parsing the reactions, performing the simulation, and giving data about the simulation.
-
-```python
-inits = {r: 10 ** 7, f: 10 ** 7}
-sim = batss.Simulation(inits, rxns)
+print((a + b | 2*c).k(0.5).r(4))
 ```
 
-Now, we can run the simulation.
+    A + B (4)<-->(0.5) C + C
+    
+
+## Simulating
+
+`Simulation` is the central object: it parses the reactions, runs the simulation, and holds the resulting
+data. It takes a dict of initial molecular counts, plus the reactions.
+
+Rate constants use the standard mass-action convention, so a reaction with $k$ reactants has its rate
+constant divided by `volume ** (k-1)`. By default `volume` is the total initial count $n$, which is usually
+what you want: it keeps the time scale independent of the population size, so the same reactions oscillate
+at the same rate whether you simulate $10^4$ molecules or $10^{10}$. (Pass `volume=...` explicitly if the
+initial counts should not define the volume.)
+
+Let's start with ten million molecules, split evenly between rabbits and foxes.
+
 
 ```python
-end_time = 10.0
-checkpoint_time = end_time / 1000
-sim.run(end_time, checkpoint_time)
+n = 10 ** 7
+sim = Simulation({r: n // 2, f: n - n // 2}, rxns, seed=0)
+sim.run(10.0, 0.01)
 ```
 
-This will cause the ``Simulation`` to simulate the CRN until continuous time 10.0, recording the state at 1000 uniformly spaced sample times. This shouldn't take more than 10 seconds to execute (at time of writing, it took about 5 seconds on a Macbook Air). We can plot these using matplotlib:
+
+That simulated 10 units of continuous time, recording the configuration every 0.01 time units. It is worth
+appreciating what just happened: with $n = 10^7$ molecules reacting for 10 time units, that is on the order
+of $10^8$ individual reactions, simulated exactly, in a couple of seconds.
+
+Every recorded configuration lives in `sim.history`, a pandas `DataFrame` indexed by time.
+
+
+```python
+sim.history
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>F</th>
+      <th>R</th>
+    </tr>
+    <tr>
+      <th>time (continuous units)</th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0.00</th>
+      <td>5000000</td>
+      <td>5000000</td>
+    </tr>
+    <tr>
+      <th>0.01</th>
+      <td>4975459</td>
+      <td>5025151</td>
+    </tr>
+    <tr>
+      <th>0.02</th>
+      <td>4950955</td>
+      <td>5050925</td>
+    </tr>
+    <tr>
+      <th>0.03</th>
+      <td>4926732</td>
+      <td>5076241</td>
+    </tr>
+    <tr>
+      <th>0.04</th>
+      <td>4902957</td>
+      <td>5102584</td>
+    </tr>
+    <tr>
+      <th>...</th>
+      <td>...</td>
+      <td>...</td>
+    </tr>
+    <tr>
+      <th>9.96</th>
+      <td>16445246</td>
+      <td>18575403</td>
+    </tr>
+    <tr>
+      <th>9.97</th>
+      <td>16586894</td>
+      <td>18454077</td>
+    </tr>
+    <tr>
+      <th>9.98</th>
+      <td>16727608</td>
+      <td>18330929</td>
+    </tr>
+    <tr>
+      <th>9.99</th>
+      <td>16866412</td>
+      <td>18207071</td>
+    </tr>
+    <tr>
+      <th>10.00</th>
+      <td>17004722</td>
+      <td>18081154</td>
+    </tr>
+  </tbody>
+</table>
+<p>1001 rows × 2 columns</p>
+</div>
+
+
+`print(sim.reactions)` shows the reactions back, which is a quick way to check that batss parsed them the
+way you intended.
+
+
+```python
+print(sim.reactions)
+```
+
+    R -->(1.0) R + R
+    R + F -->(1.0) F + F
+    F -->(1.0) 
+    
+
+## Plotting the history
+
+Because `history` is an ordinary `DataFrame`, all of pandas' plotting works directly on it.
+
+
+```python
+p = sim.history.plot()
+```
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_14_0.png)
+    
+
+
+The two populations chase each other around a cycle: rabbits boom, foxes eat well and boom in turn, the
+rabbits crash, and then the foxes starve.
+
+That structure is clearer in the *phase plane*, plotting the two counts against each other rather than
+against time. The deterministic Lotka-Volterra ODE has closed orbits, which would give an exactly repeating
+loop; the stochastic CRN instead spirals slowly outward, and it is this outward drift that eventually drives
+a species extinct (we come back to that below).
+
+
+```python
+ax = sim.history.plot(x='R', y='F', legend=False)
+ax.set_xlabel('rabbits $R$')
+ax.set_ylabel('foxes $F$')
+p = ax.set_title('phase plane')
+```
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_16_0.png)
+    
+
+
+## Larger populations
+
+Batching exists so that this stays fast as $n$ grows. Here is the very same CRN with **one billion**
+molecules — around $10^{10}$ individual reactions, which a Gillespie simulator would have to step through
+one at a time.
+
+
+```python
+n = 10 ** 9
+big = Simulation({r: n // 2, f: n - n // 2}, rxns, seed=0)
+big.run(10.0, 0.02)
+p = big.history.plot()
+```
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_18_1.png)
+    
+
+
+The trajectory is visibly smoother than at $n = 10^7$. Stochastic fluctuations scale like $\sqrt{n}$ while
+the counts themselves scale like $n$, so the *relative* noise shrinks as $\sqrt{1/n}$ and the CRN behaves
+more and more like its deterministic limit.
+
+## Running until a condition
+
+Instead of a fixed end time, `run_until` accepts a *convergence detector*: any function taking the current
+configuration (a dict mapping species to counts) and returning a bool. The simulation runs until it returns
+`True`.
+
+Lotka-Volterra is a nice example, because the stochastic model does something the deterministic one never
+does. The ODE cycles forever, but at any finite $n$ the outward spiral we saw above eventually overshoots,
+one species undershoots to zero, and it is gone for good.
+
+
+```python
+def one_species_extinct(config):
+    return config.get(r, 0) == 0 or config.get(f, 0) == 0
+
+
+n = 1000
+small = Simulation({r: n // 2, f: n - n // 2}, rxns, seed=0)
+small.run(one_species_extinct, 0.05)
+
+print(f'extinction at time {small.time:.0f}')
+print(small.config_dict)
+```
+
+
+    extinction at time 1148
+    {R: 33}
+    
+
+**A word of warning.** Calling `run()` with no arguments runs until the configuration is *silent*, meaning
+no reaction can occur at all. For Lotka-Volterra that is not safe: if the foxes die out first, then nothing
+stops $R \to 2R$, the rabbits breed without bound, and the configuration is never silent — so `run()` would
+never return. Use a convergence detector whenever silence is not guaranteed.
+
+The extinction itself is invisible on a linear axis: the counts fall through several orders of magnitude in
+the last few oscillations, and everything below a few hundred is squashed onto the $x$-axis. Matplotlib's
+`symlog` scale (linear near zero, logarithmic above it) shows the whole descent. Here are the last 120 time
+units, where the oscillations grow until one species finally undershoots to zero.
+
+
+```python
+endgame = small.history.loc[small.time - 120:]
+
+ax = endgame.plot()
+ax.set_yscale('symlog')
+ax.set_ylim(bottom=0)   # symlog would otherwise show a meaningless negative range
+p = ax.set_title('the last 120 time units before extinction')
+```
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_23_0.png)
+    
+
+
+## Long runs and log-spaced sampling
+
+We did not know in advance how long that run would take, and with a fixed `history_interval` a long run
+records a great many nearly identical configurations. `history_interval` may instead be a *function of the
+current time*, so that recording gets steadily coarser as the simulation goes on — keeping the history to a
+manageable size without losing detail early on, when things are changing fastest.
+
+
+```python
+coarse = Simulation({r: n // 2, f: n - n // 2}, rxns, seed=0)
+coarse.run(one_species_extinct, history_interval=lambda t: max(0.05, t / 200))
+
+print(f'{len(coarse.history)} configurations recorded, '
+      f'vs {len(small.history)} for the fixed interval above')
+```
+
+
+    1148 configurations recorded, vs 22964 for the fixed interval above
+    
+
+## Visualizing a single configuration
+
+Each row of `sim.history` is one configuration, so a single row can be drawn as a barplot. Here is the
+$n = 10^7$ simulation at two different times.
+
 
 ```python
 from matplotlib import pyplot as plt
-f, ax = plt.subplots()
 
-ax.plot(sim.history['R'], label = 'R')
-ax.plot(sim.history['F'], label = 'F')
-plt.legend()
-plt.show()
+
+def plot_row(row):
+    fig, ax = plt.subplots(figsize=(4, 3))
+    sim.history.iloc[row].plot(
+        ax=ax, kind='bar', ylim=(0, sim.n), rot=0, xlabel='species', ylabel='count',
+        title=f'Lotka-Volterra at time {sim.history.index[row]:.2f}')
+
+
+plot_row(0)
+plot_row(300)
 ```
 
-This produces this graph:
 
-![Plot of Lotka-Volterra oscillator](README_files/Lotka_Volterra_Simple.png)
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_27_0.png)
+    
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_27_1.png)
+    
+
+
+`ipywidgets` turns that into a slider that scrubs through the whole history.
+
+
+```python
+import ipywidgets as widgets
+
+bar = widgets.interact(plot_row, row=widgets.IntSlider(
+    min=0, max=len(sim.history) - 1, step=1, value=0, layout=widgets.Layout(width='100%')))
+```
+
+
+## Live visualization
+
+Everything above plots *after* the simulation finishes. A `Snapshot` plots *while it runs*: `StatePlotter`
+is a barplot of the current configuration and `HistoryPlotter` is a line plot of the history so far.
+`sim.add_snapshot(...)` attaches one, and it then redraws periodically during `run`.
+
+To actually watch these update live, you need an interactive matplotlib backend: `pip install ipympl`, then
+put `%matplotlib widget` at the top of the notebook. [Jupyter Lab](https://jupyterlab.readthedocs.io) is the
+recommended environment; unfortunately Google Colab does not support these backends. With the default inline
+backend, as here, the figure simply shows the final state of the run.
+
+
+```python
+from batss.snapshot import StatePlotter
+
+n = 10 ** 5
+live = Simulation({r: n // 2, f: n - n // 2}, rxns, seed=1)
+live.add_snapshot(StatePlotter())
+live.run(20.0, 0.1)
+```
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_31_0.png)
+    
+
+
+Once the run is done, `snapshot_slider` gives back a slider that moves every attached snapshot backwards
+and forwards through the recorded history.
+
+
+```python
+live.snapshot_slider('time')
+```
+
+
+## Sampling the distribution
+
+A single run is just one sample from the CRN's distribution. `sample_future_configuration` restarts from the
+current configuration many times over, and returns a `DataFrame` whose rows are the independent trials —
+exactly the shape a histogram wants.
+
+
+```python
+n = 10 ** 5
+dist = Simulation({r: n // 2, f: n - n // 2}, rxns, seed=1)
+samples = dist.sample_future_configuration(5.0, num_samples=500)
+samples.describe().loc[['mean', 'std', 'min', 'max']]
+```
+
+
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>F</th>
+      <th>R</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>mean</th>
+      <td>139652.244000</td>
+      <td>39507.468000</td>
+    </tr>
+    <tr>
+      <th>std</th>
+      <td>1067.444166</td>
+      <td>596.731402</td>
+    </tr>
+    <tr>
+      <th>min</th>
+      <td>136661.000000</td>
+      <td>37474.000000</td>
+    </tr>
+    <tr>
+      <th>max</th>
+      <td>143227.000000</td>
+      <td>41226.000000</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+
+```python
+p = samples.plot(kind='hist', bins=40, alpha=0.6,
+                 title='distribution of counts at time 5, over 500 trials')
+```
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_36_0.png)
+    
+
+
+## Time units
+
+Rate constants usually come with physical units attached. `time_units` — any string that
+`pandas.to_timedelta` accepts, such as `'seconds'` — makes the history index a pandas `TimedeltaIndex`, so
+that plots are labelled in real time.
+
+
+```python
+n = 10 ** 5
+timed = Simulation({r: n // 2, f: n - n // 2}, rxns, time_units='seconds', seed=1)
+timed.run(20.0, 0.05)
+p = timed.history.plot()
+```
+
+
+    
+![png](https://raw.githubusercontent.com/UC-Davis-molecular-computing/batss/main/README_files/README_38_1.png)
+    
+
 
 ## More examples
-See [examples](examples/). [PLACEHOLDER; doesn't exist yet]
+
+* [`examples/crn_examples.ipynb`](https://github.com/UC-Davis-molecular-computing/batss/blob/main/examples/crn_examples.ipynb) — the same tools applied to four more CRNs:
+  dimerization, the Rössler-Willamowski attractor, the Oregonator, and the Brusselator.
+* [`benchmark/benchmark.ipynb`](https://github.com/UC-Davis-molecular-computing/batss/blob/main/benchmark/benchmark.ipynb) — how batss's running time scales with the
+  population size, measured against the Gillespie algorithm.
+* [API documentation](https://batss.readthedocs.io/)

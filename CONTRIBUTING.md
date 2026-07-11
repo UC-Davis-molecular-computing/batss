@@ -1,5 +1,39 @@
 # Contributing to the batss project
 
+## Regenerating README.md
+
+**`README.md` is generated. Never edit it by hand — your changes will be overwritten.**
+
+It is the `nbconvert` output of [`README.ipynb`](README.ipynb), so that every example in the README is
+one a reader can actually download and run, and so the two cannot drift apart (they had, badly, before
+this was automated). To change the README, edit the notebook and then:
+
+```
+python scripts/make_readme.py --execute
+```
+
+That re-executes `README.ipynb` top to bottom (about 2 minutes; the `n = 10**9` cell dominates), converts
+it to `README.md`, and rewrites relative links to absolute GitHub URLs. Drop `--execute` to convert
+without re-running the notebook. Commit `README.ipynb`, `README.md`, and the regenerated
+`README_files/*.png` together.
+
+Two things the script handles that are easy to get wrong by hand:
+
+- **Images must be served from `raw.githubusercontent.com`.** `pyproject.toml` sets
+  `readme = "README.md"`, so the file becomes the PyPI long description, and PyPI cannot resolve
+  repo-relative paths. A `github.com/.../blob/...` URL returns an HTML page rather than the image, so it
+  will silently fail to render on PyPI.
+- **Progress bars and `ipywidgets` sliders are stripped**, since `nbconvert` renders them as a stale text
+  repr (a progress bar frozen at `0%|`, or `interactive(children=(IntSlider(...`) that is pure noise in a
+  static README.
+
+The other notebooks (`examples/`, `benchmark/`) are not converted to markdown; GitHub renders them
+directly. Re-execute them with:
+
+```
+python -m jupyter nbconvert --to notebook --execute --inplace examples/crn_examples.ipynb
+```
+
 ## Compiling the Rust code
 
 The Python package `batss` is a thin Python layer (in the `python/` directory) wrapping a Rust extension module compiled from the code in `src/`. We use [maturin](https://www.maturin.rs/) to compile the Rust code and bind it to Python. maturin is declared as the build backend in `pyproject.toml`, so you do not need to install it separately if you install the package with `pip`; but for local development it is convenient to install it explicitly:
