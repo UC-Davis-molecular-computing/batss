@@ -24,7 +24,7 @@ The core of the simulator is inspired by a [batching algorithm](https://arxiv.or
 The package can be installed with `pip` via
 
 
-```python
+```bash
 pip install batss
 ```
 
@@ -42,14 +42,14 @@ with all rate constants 1.
 
 Within python, begin by importing batss. To specify your species, use the `species` function:
 
-```
+```python
 import batss
 r,f = batss.species('R F')
 ```
 
 batss overloads operators to allow reactions to be specified in a way visually similar to the way they are typically notated. In this case,
 
-```
+```python
 rxns = [
     (r+f >> 2*f),
     (r >> 2*r),
@@ -59,20 +59,20 @@ rxns = [
 
 Each line creates a reaction by specifying the reactants and products. Rate constants default to 1; they can be specified inline, e.g. the first reaction's rate constant could be set to 0.5 by replacing the first reaction line with
 
-```
+```python
 (r+f >> 2*f).k(0.5),
 ``` 
 
 Next, specify initial molecular counts and create a `Simulation` object. The `Simulation` class is the most important object in the module, responsible for parsing the reactions, performing the simulation, and giving data about the simulation.
 
-```
+```python
 inits = {r: 10 ** 7, f: 10 ** 7}
 sim = batss.Simulation(inits, rxns)
 ```
 
 Now, we can run the simulation.
 
-```
+```python
 end_time = 10.0
 checkpoint_time = end_time / 1000
 sim.run(end_time, checkpoint_time)
@@ -80,7 +80,7 @@ sim.run(end_time, checkpoint_time)
 
 This will cause the ``Simulation`` to simulate the CRN until continuous time 10.0, recording the state at 1000 uniformly spaced sample times. This shouldn't take more than 10 seconds to execute (at time of writing, it took about 5 seconds on a Macbook Air). We can plot these using matplotlib:
 
-```
+```python
 from matplotlib import pyplot as plt
 f, ax = plt.subplots()
 
@@ -95,4 +95,4 @@ This produces this graph:
 ![Plot of Lotka-Volterra oscillator](README_files/Lotka_Volterra_Simple.png)
 
 ## More examples
-See [examples](examples/).
+See [examples](examples/). [PLACEHOLDER; doesn't exist yet]
