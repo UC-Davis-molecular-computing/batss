@@ -105,6 +105,13 @@ def make_gifs() -> None:
         ax.set_title(f"Lotka-Volterra at time {history.index[row]:.2f}")
         return bars
 
+    # PillowWriter grabs raw canvas frames, so unlike savefig it never applies bbox_inches="tight".
+    # With matplotlib's default margins there is not enough room below the axes for the tick labels *and*
+    # the x-label, so the x-label falls off the bottom of the GIF. Lay the figure out explicitly -- after
+    # drawing a frame, so that the title is present and tight_layout reserves room for it too.
+    draw(0)
+    fig.tight_layout()
+
     FuncAnimation(fig, draw, frames=range(0, len(history), 10), blit=False).save(
         FILES / "lv_bar_slider.gif", writer=PillowWriter(fps=FPS), dpi=80
     )
@@ -123,6 +130,9 @@ def make_gifs() -> None:
         return []
 
     assert plotter.fig is not None
+    scrub(0)
+    plotter.fig.tight_layout()  # same PillowWriter clipping hazard as above
+
     FuncAnimation(plotter.fig, scrub, frames=range(0, len(live.configs), 2), blit=False).save(
         FILES / "lv_snapshot_slider.gif", writer=PillowWriter(fps=FPS), dpi=80
     )
