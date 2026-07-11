@@ -26,17 +26,24 @@ gh auth status >/dev/null 2>&1 || { echo "error: gh not authenticated — run: g
 echo "==> Reading the package version from Cargo.toml..."
 VERSION=$(grep -m1 -E '^version[[:space:]]*=[[:space:]]*"' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
 [ -n "$VERSION" ] || { echo "error: couldn't read package version from Cargo.toml" >&2; exit 1; }
+[[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || { echo "error: version '$VERSION' in Cargo.toml is not a plain numeric X.Y.Z version; this script does not handle pre-release/suffixed versions." >&2; exit 1; }
 TAG="v$VERSION"
 echo "    Cargo.toml version: $VERSION   (tag: $TAG)"
 
 # strict-greater semver test: ver_gt A B  ==> true if A > B
 ver_gt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
 
-echo "==> Fetching origin/main (branch only, not --tags: a local tag that differs"
-echo "    from the remote's would make 'git fetch --tags' fail and abort this script)..."
+# Plain fetch (not --tags): it auto-follows tags on fetched history but never
+# overwrites an existing local tag, whereas --tags fails on a local/remote tag mismatch.
+echo "==> Fetching origin..."
 git fetch origin --quiet || { echo "error: 'git fetch origin' failed — cannot verify you are in sync with origin/main." >&2; exit 1; }
 
-echo "==> Verifying local main == origin/main (so CI builds exactly what you tested)..."
+echo "==> Verifying we are on main and local main == origin/main (so CI builds exactly what you tested)..."
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" != "main" ]; then
+  echo "error: must be run from the 'main' branch (currently on '$BRANCH')." >&2
+  exit 1
+fi
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
   echo "error: local HEAD != origin/main. Commit and push your changes first." >&2
   exit 1
@@ -45,16 +52,23 @@ git diff --quiet HEAD -- || echo "    warning: working tree has uncommitted chan
 
 echo "==> Finding the latest existing release/tag on GitHub..."
 LATEST=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
-[ -n "$LATEST" ] || LATEST=$(git tag -l 'v*' | sort -V | tail -1)
+# Fallback to local tags; consider only plain vX.Y.Z tags so version comparison stays meaningful.
+[ -n "$LATEST" ] || LATEST=$( (git tag -l 'v*' | grep -E '^v[0-9]+(\.[0-9]+)*$' || true) | sort -V | tail -1)
 echo "    Latest release/tag on GitHub: ${LATEST:-<none>}"
 
 echo "==> Guard: tag $TAG must not already exist on origin..."
-if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "refs/tags/$TAG"; then
+remote_tag=$(git ls-remote --tags origin "refs/tags/$TAG") \
+  || { echo "error: 'git ls-remote' failed — cannot verify whether tag $TAG already exists on origin." >&2; exit 1; }
+if [ -n "$remote_tag" ]; then
   echo "error: tag $TAG already exists on origin. Bump the version in Cargo.toml" >&2
   echo "       (and delete the tag + release first if this is a re-do)." >&2
   exit 1
 fi
 echo "==> Guard: $VERSION must be strictly newer than the latest release..."
+if [ -n "$LATEST" ] && ! [[ "${LATEST#v}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+  echo "error: latest release tag '$LATEST' is not a plain vX.Y.Z version; compare versions and release manually." >&2
+  exit 1
+fi
 if [ -n "$LATEST" ] && ! ver_gt "$VERSION" "${LATEST#v}"; then
   echo "error: $VERSION is NOT newer than the latest release ${LATEST#v}." >&2
   echo "       Bump the version in Cargo.toml (semver) before releasing." >&2

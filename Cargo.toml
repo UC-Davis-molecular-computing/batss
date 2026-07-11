@@ -3,7 +3,7 @@ name = "batss"
 # The single source of truth for the package version, including on PyPI:
 # pyproject.toml declares `dynamic = ["version"]`, which tells maturin to read the
 # version from here (https://www.maturin.rs/metadata). doc/conf.py also parses it.
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 
 [lib]
@@ -19,7 +19,7 @@ name = "time_rebop"
 path = "src/rebop_runtime_sampling.rs"
 
 [features]
-flm = ["flame"]  # Enable flame profiling to be switched on/off
+flm = ["flame"] # Enable flame profiling to be switched on/off
 
 
 [dependencies]
@@ -29,9 +29,11 @@ num-format = "0.4"
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"] }
 numpy = "0.28"
 ndarray = "0.16"
-rand = { version = "0.9", features = ["small_rng"] } # need version 0.8 of rand to use it with statrs, fails with version 0.9
+rand = { version = "0.9", features = [
+    "small_rng",
+] } # need version 0.8 of rand to use it with statrs, fails with version 0.9
 nalgebra = "0.33"
-flame = { version = "0.2", optional = true }  # Make flame optional so we can turn it on/off
+flame = { version = "0.2", optional = true } # Make flame optional so we can turn it on/off
 special = "0.11"
 rand_distr = "0.5"
 num-integer = "0.1"

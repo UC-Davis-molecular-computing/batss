@@ -23,6 +23,9 @@ Write-Host '==> Reading the package version from Cargo.toml...'
 $m = Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
 if (-not $m) { Write-Error "couldn't read package version from Cargo.toml"; exit 1 }
 $Version = $m.Matches[0].Groups[1].Value
+if ($Version -notmatch '^\d+(\.\d+)*$') {
+    Write-Error "version '$Version' in Cargo.toml is not a plain numeric X.Y.Z version; this script does not handle pre-release/suffixed versions."; exit 1
+}
 $Tag = "v$Version"
 Write-Host "    Cargo.toml version: $Version   (tag: $Tag)"
 
@@ -40,11 +43,17 @@ function Test-VersionGreater([string]$a, [string]$b) {
     return $false
 }
 
-Write-Host '==> Fetching origin/main (branch only, not --tags: a local tag that differs from the remote would fail the fetch)...'
+# Plain fetch (not --tags): it auto-follows tags on fetched history but never
+# overwrites an existing local tag, whereas --tags fails on a local/remote tag mismatch.
+Write-Host '==> Fetching origin...'
 git fetch origin --quiet
 if ($LASTEXITCODE -ne 0) { Write-Error "'git fetch origin' failed - cannot verify sync with origin/main."; exit 1 }
 
-Write-Host '==> Verifying local main == origin/main...'
+Write-Host '==> Verifying we are on main and local main == origin/main...'
+$branch = (git rev-parse --abbrev-ref HEAD).Trim()
+if ($branch -ne 'main') {
+    Write-Error "must be run from the 'main' branch (currently on '$branch')."; exit 1
+}
 if ((git rev-parse HEAD).Trim() -ne (git rev-parse origin/main).Trim()) {
     Write-Error 'local HEAD != origin/main. Commit and push first so CI builds what you tested.'; exit 1
 }
@@ -53,16 +62,28 @@ if ($LASTEXITCODE -ne 0) { Write-Warning 'working tree has uncommitted changes; 
 
 Write-Host '==> Finding the latest existing release/tag on GitHub...'
 $Latest = (gh release view --json tagName --jq .tagName 2>$null | Out-String).Trim()
-if (-not $Latest) { $Latest = git tag -l 'v*' | Sort-Object { [version]($_ -replace '^v', '') } | Select-Object -Last 1 }
+if (-not $Latest) {
+    # Fallback to local tags; consider only plain vX.Y.Z tags so the [version] cast can't throw.
+    $Latest = git tag -l 'v*' | Where-Object { $_ -match '^v\d+(\.\d+)*$' } |
+        Sort-Object { [version]($_ -replace '^v', '') } | Select-Object -Last 1
+}
 Write-Host "    Latest release/tag on GitHub: $(if ($Latest) { $Latest } else { '<none>' })"
 
 Write-Host "==> Guard: tag $Tag must not already exist on origin..."
-if (git ls-remote --tags origin "refs/tags/$Tag") {
+$remoteTag = git ls-remote --tags origin "refs/tags/$Tag"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "'git ls-remote' failed - cannot verify whether tag $Tag already exists on origin."; exit 1
+}
+if ($remoteTag) {
     Write-Error "tag $Tag already exists on origin. Bump the version in Cargo.toml (delete tag+release first if re-doing)."; exit 1
 }
 Write-Host "==> Guard: $Version must be strictly newer than the latest release..."
-if ($Latest -and -not (Test-VersionGreater $Version ($Latest -replace '^v', ''))) {
-    Write-Error "$Version is NOT newer than the latest release $($Latest -replace '^v',''). Bump the version in Cargo.toml."; exit 1
+$LatestVer = $Latest -replace '^v', ''
+if ($Latest -and $LatestVer -notmatch '^\d+(\.\d+)*$') {
+    Write-Error "latest release tag '$Latest' is not a plain vX.Y.Z version; compare versions and release manually."; exit 1
+}
+if ($Latest -and -not (Test-VersionGreater $Version $LatestVer)) {
+    Write-Error "$Version is NOT newer than the latest release $LatestVer. Bump the version in Cargo.toml."; exit 1
 }
 
 Write-Host ''
