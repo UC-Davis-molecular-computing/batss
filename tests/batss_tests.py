@@ -202,6 +202,138 @@ class TestCRNSimulation(unittest.TestCase):
             "the Gillespie-sync hang may have regressed",
         )
 
+    def test_prospective_switch_replays_exactly(self) -> None:
+        """The deterministic prospective score must replay a run that crosses its threshold.
+
+        A -> 2A has prospective K=n, order 1, and generativity 1, so its score is
+        sqrt(pi*n/8). Starting from n=100 it crosses threshold 10 near n=255, exercising
+        batch -> Gillespie -> batch without using wall-clock measurements.
+        """
+        a, = species('A')
+        rxns = [(a >> 2 * a).k(1)]
+
+        def run_once() -> Simulation:
+            sim = Simulation({a: 100}, rxns, simulator_method='crn', continuous_time=True, seed=17)
+            self.assertEqual(sim.simulator.heuristic_gillespie_switching, 0)
+            sim.simulator.heuristic_gillespie_switching = 2
+            sim.simulator.proxy_threshold = 10.0
+            self.assertAlmostEqual(
+                sim.simulator.prospective_batch_score(),
+                numpy.sqrt(numpy.pi * sim.simulator.n / 8),
+            )
+            sim.run(2.0, history_interval=0.25, timer=False)
+            self.assertGreaterEqual(sim.simulator.continuous_time, 2.0)
+            return sim
+
+        first = run_once()
+        second = run_once()
+
+        self.assertTrue(first.history.equals(second.history))
+        numpy.testing.assert_array_equal(first.simulator.config, second.simulator.config)
+        for name in (
+            'batch_calls',
+            'gillespie_calls',
+            'mode_switches',
+            'batch_continuous_time',
+            'gillespie_continuous_time',
+        ):
+            self.assertEqual(getattr(first.simulator.switch, name), getattr(second.simulator.switch, name))
+        self.assertEqual(first.simulator.do_gillespie, second.simulator.do_gillespie)
+        self.assertEqual(first.simulator.k_resets, second.simulator.k_resets)
+        self.assertGreater(first.simulator.switch.batch_calls, 0)
+        self.assertGreater(first.simulator.switch.gillespie_calls, 0)
+        self.assertEqual(first.simulator.switch.mode_switches, 2)
+
+    def test_prospective_score_uses_reset_k_during_gillespie(self) -> None:
+        """A frozen Gillespie K must not feed back into the prospective batch score."""
+        a, = species('A')
+        sim = Simulation(
+            {a: 100},
+            [(a >> 2 * a).k(1)],
+            simulator_method='crn',
+            continuous_time=True,
+            seed=17,
+        )
+        sim.simulator.heuristic_gillespie_switching = 2
+        sim.simulator.proxy_threshold = float('inf')
+        sim.simulator.run(1.0, 15.0)
+
+        self.assertTrue(sim.simulator.do_gillespie)
+        self.assertGreaterEqual(sim.simulator.continuous_time, 1.0)
+        self.assertAlmostEqual(
+            sim.simulator.prospective_batch_score(),
+            numpy.sqrt(numpy.pi * sim.simulator.n / 8),
+        )
+
+    def test_combined_reaction_order_replays_exactly(self) -> None:
+        """Combined reactant sets have a canonical order before rebop registration.
+
+        A randomized HashMap iteration order previously swapped these two equally rated
+        Gillespie reactions between fresh simulators, producing different fixed-seed results.
+        """
+        a, b, c, d = species('A B C D')
+        rxns = [(a >> b).k(1), (c >> d).k(1)]
+
+        def run_once() -> Simulation:
+            sim = Simulation(
+                {a: 100, c: 100},
+                rxns,
+                simulator_method='crn',
+                continuous_time=True,
+                seed=17,
+            )
+            sim.simulator.heuristic_gillespie_switching = 2
+            sim.simulator.proxy_threshold = float('inf')
+            sim.run(1.0, history_interval=0.25, timer=False)
+            self.assertGreater(sim.simulator.switch.gillespie_calls, 0)
+            return sim
+
+        first = run_once()
+        second = run_once()
+
+        self.assertTrue(first.history.equals(second.history))
+        numpy.testing.assert_array_equal(first.simulator.config, second.simulator.config)
+        self.assertEqual(first.simulator.switch.batch_calls, second.simulator.switch.batch_calls)
+        self.assertEqual(first.simulator.switch.gillespie_calls, second.simulator.switch.gillespie_calls)
+        self.assertEqual(first.simulator.switch.mode_switches, second.simulator.switch.mode_switches)
+
+    def test_frozen_state_engine_oracle_counts_work(self) -> None:
+        """The experimental timing oracle reports exact work without mixing in setup."""
+        a, = species('A')
+
+        def make_sim(seed: int) -> Simulation:
+            return Simulation(
+                {a: 100},
+                [(a >> 2 * a).k(1)],
+                simulator_method='crn',
+                continuous_time=True,
+                seed=seed,
+                volume=100,
+            )
+
+        batch_sim = make_sim(17)
+        self.assertEqual(batch_sim.simulator.debug_prospective_n(), 200)
+        self.assertEqual(batch_sim.simulator.debug_q(), 3)
+        self.assertEqual(batch_sim.simulator.debug_reactant_sets(), 1)
+        self.assertEqual(batch_sim.simulator.debug_output_branches(), 1)
+        batch = batch_sim.simulator.benchmark_engine_call(False)
+        self.assertFalse(batch.gillespie)
+        self.assertGreater(batch.total_reactions, 0)
+        self.assertLessEqual(batch.active_reactions, batch.total_reactions)
+        self.assertGreater(batch.continuous_time_advanced, 0)
+        self.assertGreaterEqual(batch.engine_seconds, 0)
+        self.assertGreaterEqual(batch.postprocess_seconds, 0)
+
+        gillespie_sim = make_sim(19)
+        gillespie = gillespie_sim.simulator.benchmark_engine_call(True, 7)
+        self.assertTrue(gillespie.gillespie)
+        self.assertEqual(gillespie.total_reactions, 7)
+        self.assertEqual(gillespie.active_reactions, 7)
+        self.assertGreater(gillespie.continuous_time_advanced, 0)
+        self.assertGreaterEqual(gillespie.setup_seconds, 0)
+        self.assertGreaterEqual(gillespie.engine_seconds, 0)
+
+
 
 # taken from https://stackoverflow.com/questions/23549419/assert-that-two-dictionaries-are-almost-equal
 def assertDeepAlmostEqual(test_case: unittest.TestCase, expected: Any, actual: Any,

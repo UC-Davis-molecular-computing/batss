@@ -113,13 +113,17 @@ impl UniformCRN {
             q == all_species_seen.len(),
             "Species must be indexed using contiguous integers starting from 0"
         );
-        let reactions_out: Vec<CombinedReactions> = collected_reactions
+        let mut reactions_out: Vec<CombinedReactions> = collected_reactions
             .keys()
             .map(|x| CombinedReactions {
                 reactants: x.to_vec(),
                 products_and_rate_constants: collected_reactions[x].clone(),
             })
             .collect();
+        // HashMap iteration order is randomized independently for every map. Keeping that order
+        // here made otherwise-identical simulators register reactions with rebop in different
+        // orders, so a fixed Gillespie seed could select a different reaction.
+        reactions_out.sort_unstable_by(|left, right| left.reactants.cmp(&right.reactants));
         return UniformCRN {
             o,
             g,
@@ -137,42 +141,12 @@ impl UniformCRN {
     /// Returns a tuple of these three objects in that order.
     fn construct_transition_arrays(&mut self, k_count: u64) -> (ArrayD<usize>, Vec<StateList>, Vec<f64>) {
         flame::start("construct_transition_arrays");
-        let mut max_total_adjusted_rate_constant: f64 = 0.0;
         // Iterate through reactions, adjusting rate constants to account for how many K
         // are being added, and for symmetry that results from the scheduler having different
         // orders it can pick, so that the adjusted CRN keeps the original dynamics.
         flame::start("construct_transition_arrays: first reaction loop");
-        for reaction in &self.reactions {
-            let reactants = &reaction.reactants;
-            let symmetry_degree = Self::symmetry_degree(reactants);
-            let k_count_correction_factor = self.k_count_correction_factor(reactants, k_count);
-            // By adding K as a reactant, we artificially speed up any reaction with K in it.
-            // We also artificially speed up any reaction that can have its reactants written in
-            // many different orders (i.e., with many distinct reactants) because the batching
-            // algorithm chooses reactants one at a time, so e.g. there are twice as many ways
-            // to choose an 'A' and a 'B' compared to an 'A' and an 'A', as either could be first.
-            // We correct for those factors here.
-            let artificial_speedup_factor: f64 = k_count_correction_factor as f64 / symmetry_degree as f64;
-            let mut total_rate_constant = 0.0;
-            for output in &reaction.products_and_rate_constants {
-                total_rate_constant += output.1;
-            }
-            let total_adjusted_rate_constant = total_rate_constant / artificial_speedup_factor;
-            // The batching algorithm needs to know how much continuous time one step corresponds to.
-            // This function is doing the calculation that can determine this.
-            // When batching, the reactant set with the highest total rate constant always causes an
-            // active reaction when chosen, and the number of ways to choose it is equal to
-            // its propensity times its symmetry degree.
-            // The missing factor to convert between the expected time to this reaction in the
-            // original CRN and the batching CRN is the total rate constant.
-            // TODO I'm not sure if I'm handling symmetry factor correction right here.
-            // Make sure to test it on, say, a CRN with A + A -> blah and A + B -> blah,
-            // in both the case where the first and the second reaction are much faster.
-            if total_adjusted_rate_constant > max_total_adjusted_rate_constant {
-                max_total_adjusted_rate_constant = total_adjusted_rate_constant;
-                self.continuous_time_correction_factor = total_adjusted_rate_constant;
-            }
-        }
+        let max_total_adjusted_rate_constant = self.max_adjusted_rate_constant_at(k_count);
+        self.continuous_time_correction_factor = max_total_adjusted_rate_constant;
         flame::end("construct_transition_arrays: first reaction loop");
         // random_transitions has o+1 dimensions, the first o of which have length q,
         // and the last of which has length 2.
@@ -217,6 +191,25 @@ impl UniformCRN {
         );
         flame::end("construct_transition_arrays");
         return (random_transitions, random_outputs, random_probabilities);
+    }
+
+    /// The largest total adjusted rate for any combined reactant set at an arbitrary K count.
+    ///
+    /// This is the scalar calculation performed before `construct_transition_arrays` fills its
+    /// tables, factored out so the prospective switching heuristic can evaluate a future batch's K
+    /// without rebuilding or allocating those tables. Rates for outputs sharing a reactant set are
+    /// summed because that combined set owns one transition-table lane.
+    fn max_adjusted_rate_constant_at(&self, k_count: u64) -> f64 {
+        let mut max_total_adjusted_rate_constant: f64 = 0.0;
+        for reaction in &self.reactions {
+            let symmetry_degree = Self::symmetry_degree(&reaction.reactants);
+            let k_count_correction_factor = self.k_count_correction_factor(&reaction.reactants, k_count);
+            let total_rate_constant: f64 = reaction.products_and_rate_constants.iter().map(|output| output.1).sum();
+            let artificial_speedup_factor = k_count_correction_factor as f64 / symmetry_degree as f64;
+            let total_adjusted_rate_constant = total_rate_constant / artificial_speedup_factor;
+            max_total_adjusted_rate_constant = max_total_adjusted_rate_constant.max(total_adjusted_rate_constant);
+        }
+        max_total_adjusted_rate_constant
     }
 
     fn k_count_correction_factor(&self, reactants: &Vec<State>, k_count: u64) -> u64 {
@@ -271,11 +264,13 @@ impl UniformCRN {
     /// the count of each reactant.
     fn symmetry_degree(reactants: &Vec<State>) -> u64 {
         let mut factor = 1;
-        let mut frequencies: HashMap<State, u64> = HashMap::new();
-        for reactant in reactants {
-            *frequencies.entry(*reactant).or_default() += 1;
-        }
-        for frequency in frequencies.values() {
+        // Reaction orders are small, so an O(o^2) scan is cheaper than allocating a HashMap here.
+        // This matters because the prospective score calls the adjusted-rate helper in the hot loop.
+        for (index, reactant) in reactants.iter().enumerate() {
+            if reactants[..index].contains(reactant) {
+                continue;
+            }
+            let frequency = reactants.iter().filter(|candidate| **candidate == *reactant).count() as u64;
             for i in 2..frequency + 1 {
                 factor *= i;
             }
@@ -288,6 +283,7 @@ impl UniformCRN {
 /// batching engine or in Gillespie mode. Settable from Python via `BatchSimulator.heuristic`.
 pub const HEURISTIC_WALLCLOCK: u8 = 0;
 pub const HEURISTIC_PROXY: u8 = 1;
+pub const HEURISTIC_PROSPECTIVE: u8 = 2;
 
 /// All state for the batch/Gillespie mode-switching heuristic, grouped into one struct so the
 /// simulator doesn't carry a dozen more top-level fields. Holds the heuristic selector and its
@@ -301,12 +297,13 @@ pub struct SwitchState {
     // --- configuration (selects and tunes the heuristic) ---
     /// HEURISTIC_WALLCLOCK (0, default): switch by measured wall-clock per unit continuous time.
     /// HEURISTIC_PROXY (1): use only the original reaction-count rule (no timing, no probing).
+    /// HEURISTIC_PROSPECTIVE (2): use the experimental deterministic prospective-batch score.
     #[pyo3(get)]
     pub heuristic: u8,
-    /// Reaction-count rule threshold: prefer Gillespie when the expected number of active
-    /// reactions in the next batch is below this. Defaults to the reaction count (the original
-    /// rule). Raise it to model batch mode's fixed per-batch overhead -- i.e. require more expected
-    /// active reactions before batching is worth it.
+    /// Score threshold for HEURISTIC_PROXY and HEURISTIC_PROSPECTIVE: prefer Gillespie when the
+    /// selected estimate of active reactions in the next batch is below this. Defaults to the
+    /// reaction count (the original rule). Raise it to model batch mode's fixed per-batch overhead
+    /// -- i.e. require more expected active reactions before batching is worth it.
     #[pyo3(get)]
     pub proxy_threshold: f64,
 
@@ -424,6 +421,33 @@ impl SwitchState {
             self.has_batch_est = true;
         }
     }
+}
+
+/// Timings and work counts from one experimental, frozen-state engine call.
+///
+/// Setup and state canonicalization are reported separately from steady engine work so an offline
+/// model can fit the batch/Gillespie crossover without accidentally learning switch overhead.
+#[pyclass(from_py_object)]
+#[derive(Clone)]
+pub struct EngineCallBenchmark {
+    #[pyo3(get)]
+    pub gillespie: bool,
+    #[pyo3(get)]
+    pub preparation_seconds: f64,
+    #[pyo3(get)]
+    pub setup_seconds: f64,
+    #[pyo3(get)]
+    pub engine_seconds: f64,
+    #[pyo3(get)]
+    pub postprocess_seconds: f64,
+    #[pyo3(get)]
+    pub continuous_time_advanced: f64,
+    #[pyo3(get)]
+    pub total_reactions: u64,
+    #[pyo3(get)]
+    pub active_reactions: u64,
+    #[pyo3(get)]
+    pub k_rebuilt: bool,
 }
 
 #[pyclass(extends = Simulator)]
@@ -676,7 +700,8 @@ impl BatchSimulator {
     }
 
     /// The batch/Gillespie switching heuristic in use: 0 = wall-clock (default), 1 = the simpler
-    /// reaction-count proxy only. Settable from Python to A/B-test heuristics empirically.
+    /// reaction-count proxy, 2 = the experimental deterministic prospective score. Settable from
+    /// Python to A/B-test heuristics empirically.
     #[getter]
     pub fn heuristic_gillespie_switching(&self) -> u8 {
         self.switch.heuristic
@@ -687,8 +712,8 @@ impl BatchSimulator {
         self.switch.heuristic = value;
     }
 
-    /// Threshold for the reaction-count proxy rule (prefer Gillespie when the expected active
-    /// reactions in the next batch fall below it). See :class:`SwitchState`.
+    /// Threshold for the proxy or prospective score (prefer Gillespie when the selected estimate
+    /// of active reactions in the next batch falls below it). See :class:`SwitchState`.
     #[getter]
     pub fn proxy_threshold(&self) -> f64 {
         self.switch.proxy_threshold
@@ -699,6 +724,108 @@ impl BatchSimulator {
         self.switch.proxy_threshold = value;
     }
 
+    /// Experimental deterministic estimate of active reactions in a batch prepared at the K value
+    /// returned by `k_reset_target`. This is pure and does not rebuild transition arrays.
+    pub fn prospective_batch_score(&self) -> f64 {
+        let real_propensity = self.calculate_total_propensity(false);
+        self.prospective_batch_score_from_real_propensity(real_propensity)
+    }
+
+    /// Benchmark one engine call from the current real-species configuration.
+    ///
+    /// This experimental API canonicalizes K before timing, then reports preparation, Gillespie
+    /// construction, steady engine work, and postprocessing separately. It mutates the simulator;
+    /// callers collecting a frozen-state sample should use a fresh or reset simulator per trial.
+    #[pyo3(signature = (gillespie, gillespie_reactions=None))]
+    pub fn benchmark_engine_call(
+        &mut self,
+        gillespie: bool,
+        gillespie_reactions: Option<u64>,
+    ) -> PyResult<EngineCallBenchmark> {
+        if !(self.calculate_total_propensity(false) > 0.0) {
+            return Err(PyValueError::new_err(
+                "Cannot benchmark an engine call from a silent configuration.",
+            ));
+        }
+
+        // Put both trials at the same prospective batch state. This work is reported but excluded
+        // from steady engine time, because a fitted threshold should not absorb switch overhead.
+        let preparation_start = Instant::now();
+        self.recycle_waste();
+        let prospective_k = self.k_reset_target();
+        let mut k_rebuilt = false;
+        if self.urn.config[self.crn.k] != prospective_k {
+            self.reset_k_count();
+            k_rebuilt = true;
+        }
+        let preparation_seconds = preparation_start.elapsed().as_secs_f64();
+        let continuous_time_before = self.continuous_time;
+
+        if gillespie {
+            let setup_start = Instant::now();
+            self.initialize_gillespie_config();
+            let setup_seconds = setup_start.elapsed().as_secs_f64();
+
+            let requested_reactions = gillespie_reactions.unwrap_or_else(|| self.n.sqrt().max(1)).max(1);
+            let engine_start = Instant::now();
+            let mut actual_reactions = 0;
+            let gillespie_time;
+            {
+                let gillespie_engine = self.gillespie.as_mut().unwrap();
+                gillespie_engine.set_time(continuous_time_before);
+                let mut rates = vec![f64::NAN; gillespie_engine.nb_reactions()];
+                for _ in 0..requested_reactions {
+                    let time_before_reaction = gillespie_engine.get_time();
+                    gillespie_engine._advance_one_reaction(&mut rates);
+                    if !gillespie_engine.get_time().is_finite() {
+                        // rebop uses +infinity to report that no reaction remains enabled.
+                        gillespie_engine.set_time(time_before_reaction);
+                        break;
+                    }
+                    actual_reactions += 1;
+                }
+                gillespie_time = gillespie_engine.get_time();
+            }
+            let engine_seconds = engine_start.elapsed().as_secs_f64();
+            self.continuous_time = gillespie_time;
+
+            let postprocess_start = Instant::now();
+            self.sync_urn_from_gillespie();
+            let postprocess_seconds = postprocess_start.elapsed().as_secs_f64();
+
+            Ok(EngineCallBenchmark {
+                gillespie,
+                preparation_seconds,
+                setup_seconds,
+                engine_seconds,
+                postprocess_seconds,
+                continuous_time_advanced: self.continuous_time - continuous_time_before,
+                total_reactions: actual_reactions,
+                active_reactions: actual_reactions,
+                k_rebuilt,
+            })
+        } else {
+            let engine_start = Instant::now();
+            let (total_reactions, active_reactions) = self.batch_step(f64::INFINITY, true);
+            let engine_seconds = engine_start.elapsed().as_secs_f64();
+
+            let postprocess_start = Instant::now();
+            k_rebuilt |= self.finish_batch_step();
+            let postprocess_seconds = postprocess_start.elapsed().as_secs_f64();
+
+            Ok(EngineCallBenchmark {
+                gillespie,
+                preparation_seconds,
+                setup_seconds: 0.0,
+                engine_seconds,
+                postprocess_seconds,
+                continuous_time_advanced: self.continuous_time - continuous_time_before,
+                total_reactions,
+                active_reactions,
+                k_rebuilt,
+            })
+        }
+    }
     /// A read-only snapshot of the mode-switching state (config + measurement EMAs + observability
     /// counters). See :class:`SwitchState`.
     #[getter]
@@ -766,22 +893,8 @@ impl BatchSimulator {
                     self.switch.mode_switches += 1;
                 }
                 let s = Instant::now();
-                self.batch_step(t_max);
-                let current_k_count = self.urn.config[self.crn.k];
-                let target_k_count = self.k_reset_target();
-                // Rebuild K (costly: reconstructs the transition arrays) only when the count has drifted
-                // more than a factor K_RESET_BAND_FACTOR from its target min(2n, crossover). Testing this
-                // every batch is cheap; the band avoids rebuilding on every small change in n while K
-                // tracks the 2n branch, and once K reaches the config-independent crossover it stops
-                // firing. The band also smooths the boundary: as n falls into the crossover>2n regime, K
-                // is not corrected until n has dropped a factor K_RESET_BAND_FACTOR past crossover/2.
-                let lo = current_k_count.min(target_k_count).max(1) as f64;
-                let hi = current_k_count.max(target_k_count) as f64;
-                if hi > K_RESET_BAND_FACTOR * lo {
-                    self.reset_k_count();
-                    self.k_resets += 1;
-                }
-                self.recycle_waste();
+                let _ = self.batch_step(t_max, false);
+                self.finish_batch_step();
                 let elapsed = s.elapsed().as_secs_f64();
                 let dt = self.continuous_time - ct_before;
                 self.switch.batch_wallclock_seconds += elapsed;
@@ -798,8 +911,18 @@ impl BatchSimulator {
             // reaction-count rule; HEURISTIC_WALLCLOCK (default) starts from that rule but lets a
             // measured wall-clock-per-continuous-time (w/dt) comparison override it once the other
             // mode is measured decisively cheaper, probing the other mode occasionally to measure it.
+            // HEURISTIC_PROSPECTIVE is deterministic and evaluates the batch at k_reset_target().
             // !(p > 0.0) rather than p == 0.0 so that a NaN from any future degenerate
             // propensity ratio is also treated as silent instead of bypassing the check.
+            if self.switch.heuristic == HEURISTIC_PROSPECTIVE {
+                let real_propensity = self.calculate_total_propensity(false);
+                if !(real_propensity > 0.0) {
+                    self.silent = true;
+                }
+                let score = self.prospective_batch_score_from_real_propensity(real_propensity);
+                self.set_mode(score < self.switch.proxy_threshold);
+                continue;
+            }
             let active_probability = self.active_reaction_probability();
             if !(active_probability > 0.0) {
                 self.silent = true;
@@ -993,6 +1116,14 @@ impl BatchSimulator {
         Ok(())
     }
 
+    /// Clear all Flame spans accumulated by the current thread.
+    ///
+    /// This lets a benchmark discard simulator-construction spans before profiling one frozen
+    /// state. It is a no-op in ordinary builds where the flm feature is disabled.
+    pub fn clear_profile(&self) {
+        flame::clear();
+    }
+
     #[pyo3(signature = (r, u, has_bounds=false))]
     pub fn sample_collision(&self, r: u64, u: f64, has_bounds: bool) -> u64 {
         return self.sample_collision_fast_f128(r, u, has_bounds);
@@ -1128,6 +1259,22 @@ impl BatchSimulator {
     pub fn debug_k_reset_target(&self) -> u64 {
         self.k_reset_target()
     }
+    pub fn debug_prospective_n(&self) -> u64 {
+        self.n.saturating_add(self.k_reset_target())
+    }
+    pub fn debug_q(&self) -> usize {
+        self.crn.q
+    }
+    pub fn debug_reactant_sets(&self) -> usize {
+        self.crn.reactions.len()
+    }
+    pub fn debug_output_branches(&self) -> usize {
+        self.crn
+            .reactions
+            .iter()
+            .map(|reaction| reaction.products_and_rate_constants.len())
+            .sum()
+    }
 }
 
 // --- Wall-clock-aware batch/Gillespie switching ---------------------------------
@@ -1177,10 +1324,12 @@ fn write_span_data(content: &mut String, span_data_map: &HashMap<String, SpanDat
     }
     for span_data in span_datas {
         content.push_str(&format!(
-            "{}{:name_length$}: {} ms\n",
+            "{}{:name_length$}: {:.3} ms ({} calls, {:.3} us/call)\n",
             indent,
             span_data.name,
-            span_data.ns / 1_000_000
+            span_data.ns as f64 / 1_000_000.0,
+            span_data.count,
+            span_data.ns as f64 / span_data.count as f64 / 1_000.0,
         ));
         write_span_data(content, &span_data.children, depth + 1);
     }
@@ -1189,6 +1338,7 @@ fn write_span_data(content: &mut String, span_data_map: &HashMap<String, SpanDat
 struct SpanData {
     name: String,
     ns: u64,
+    count: u64,
     children: HashMap<String, SpanData>,
 }
 
@@ -1197,6 +1347,7 @@ impl SpanData {
         SpanData {
             name,
             ns: 0,
+            count: 0,
             children: HashMap::new(),
         }
     }
@@ -1211,6 +1362,7 @@ fn process_span(span_data_map: &mut HashMap<String, SpanData>, span: &flame::Spa
 
     let span_data = span_data_map.get_mut(&span_name).unwrap();
     span_data.ns += span.delta;
+    span_data.count += 1;
 
     // Process children recursively
     for child in &span.children {
@@ -1336,6 +1488,33 @@ fn make_batch_result(dimensions: usize, length: usize) -> NDBatchResult {
 }
 
 impl BatchSimulator {
+    /// Compute the prospective score from a real-reaction propensity already evaluated for the
+    /// current original-species configuration. Keeping the propensity as an argument avoids doing
+    /// that work twice in run's hot loop.
+    fn prospective_batch_score_from_real_propensity(&self, real_propensity: f64) -> f64 {
+        if !(real_propensity > 0.0) {
+            return 0.0;
+        }
+
+        let prospective_k = self.k_reset_target();
+        let prospective_n = self.n.saturating_add(prospective_k);
+        let kmax = self.crn.max_adjusted_rate_constant_at(prospective_k);
+        let total_propensity = kmax * binomial_as_f64(prospective_n, self.crn.o as u64);
+        if !(total_propensity > 0.0) {
+            return 0.0;
+        }
+
+        let o = self.crn.o as f64;
+        let g = self.crn.g as f64;
+        let collision_denominator = 2.0 * o * (o + g);
+        if !(collision_denominator > 0.0) {
+            return 0.0;
+        }
+        let expected_batch_length =
+            (std::f64::consts::PI / collision_denominator).sqrt() * (prospective_n as f64).sqrt();
+        (real_propensity / total_propensity) * expected_batch_length
+    }
+
     /// Choose the engine for the next iteration (`true` = Gillespie), maintaining the
     /// `just_started_gillespie` / `just_finished_gillespie` transition flags exactly as the
     /// original switching code did, so the one-time rebuild still fires on a real transition.
@@ -1355,10 +1534,32 @@ impl BatchSimulator {
         }
     }
 
+    /// Apply the normal between-batch K-band check and recycle W.
+    ///
+    /// Returning whether K was rebuilt lets the offline oracle keep rare transition-array rebuilds
+    /// separate from steady batch work while production run keeps the same timing/accounting.
+    fn finish_batch_step(&mut self) -> bool {
+        flame::start("finish batch step");
+        let current_k_count = self.urn.config[self.crn.k];
+        let target_k_count = self.k_reset_target();
+        // Rebuild K only when it has drifted more than the multiplicative band from its target.
+        let lo = current_k_count.min(target_k_count).max(1) as f64;
+        let hi = current_k_count.max(target_k_count) as f64;
+        let k_rebuilt = hi > K_RESET_BAND_FACTOR * lo;
+        if k_rebuilt {
+            self.reset_k_count();
+            self.k_resets += 1;
+        }
+        self.recycle_waste();
+        flame::end("finish batch step");
+        k_rebuilt
+    }
+
     /// Run one batch of reactions, on average O(sqrt(n)) of them, some of which will typically be passive.
     /// Returns after simulating one batch, and does not necessarily run until `t_max`.
     /// Updates the urn and any relevant variables; the `BatchSimulator` should be in a valid state afterward.
-    fn batch_step(&mut self, t_max: f64) -> () {
+    fn batch_step(&mut self, t_max: f64, track_active_reactions: bool) -> (u64, u64) {
+        flame::start("batch step");
         self.updated_counts.reset();
         assert_eq!(
             self.n_including_extra_species, self.urn.size,
@@ -1380,6 +1581,7 @@ impl BatchSimulator {
 
         let mut rxns_before_coll = l;
         assert!(l > 0, "sample_coll must return at least 1 for batching");
+        flame::start("sample batch clock");
         let batch_time = self.sample_batch_time(self.n_including_extra_species, l);
         let mut do_collision = true;
         if self.continuous_time + batch_time <= t_max {
@@ -1411,6 +1613,7 @@ impl BatchSimulator {
             self.continuous_time = t_max;
             flame::end("checkpoint rejection sampling");
         }
+        flame::end("sample batch clock");
 
         // The idea here is to iterate through random_transitions and array_sums together; they should
         // both be indexed by q^o-tuples when iterated through this way, and the iteration order should
@@ -1421,6 +1624,7 @@ impl BatchSimulator {
 
         flame::start("process batch");
         let mut done = false;
+        let mut active_reactions_this_batch = 0;
         let reactions_iter = self.random_transitions.lanes(Axis(self.crn.o)).into_iter();
         // TODO: we might be able to reintroduce the optimzation around keeping the urn sorted
         // and taking advantage of sample_vector returning the highest state returned. Probably
@@ -1431,14 +1635,12 @@ impl BatchSimulator {
                 !done,
                 "self.array_sums finished iterating before self.random_transitions"
             );
-            flame::start("pre-reaction-checking");
             let next_array_sum = self.array_sums.get_next();
             // TODO maybe add an assert check that the two structures are iterated through
             // in the same order, i.e. reactants match
             let (reactants, quantity) = (next_array_sum.0, next_array_sum.1);
             done = next_array_sum.2;
             if quantity == 0 {
-                flame::end("pre-reaction-checking");
                 continue;
             }
             let initial_updated_counts_size = self.updated_counts.size;
@@ -1446,36 +1648,33 @@ impl BatchSimulator {
             // TODO and WARNING: this code is more or less copy-paste with the collision sampling code.
             // They do the same thing. But it's apparently very annoying to refactor this into a
             // helper method in rust because of the immutable borrow of self above.
-            flame::end("pre-reaction-checking");
             if num_outputs == 0 {
-                flame::start("passive reaction");
                 // Passive reaction. Move the reactants from self.urn to self.updated_counts (for collision sampling), and add W.
                 for reactant in reactants {
                     self.updated_counts.add_to_entry(reactant, quantity as i64);
                 }
                 self.updated_counts
                     .add_to_entry(self.crn.w, (quantity * self.crn.g as u64) as i64);
-                flame::end("passive reaction");
             } else {
-                flame::start("active reaction");
                 let mut probabilities = self.transition_probabilities[first_idx..first_idx + num_outputs].to_vec();
                 let active_probability_sum: f64 = probabilities.iter().sum();
                 if active_probability_sum < 1.0 {
                     probabilities.push(1.0 - active_probability_sum);
                 }
-                flame::start("multinomial sample");
                 multinomial_sample(
                     quantity,
                     &probabilities,
                     &mut self.m[0..probabilities.len()],
                     &mut self.rng,
                 );
-                flame::end("multinomial sample");
                 assert_eq!(
                     self.m[0..probabilities.len()].iter().sum::<u64>(),
                     quantity,
                     "sample sum mismatch"
                 );
+                if track_active_reactions {
+                    active_reactions_this_batch += self.m[0..num_outputs].iter().sum::<u64>();
+                }
                 for offset in 0..num_outputs {
                     let idx = first_idx + offset;
                     let outputs = &self.random_outputs[idx];
@@ -1492,7 +1691,6 @@ impl BatchSimulator {
                         self.updated_counts.add_to_entry(reactant, passive_count as i64);
                     }
                 }
-                flame::end("active reaction");
             }
             assert_eq!(
                 quantity * (self.crn.o + self.crn.g) as u64,
@@ -1588,14 +1786,15 @@ impl BatchSimulator {
                 if active_probability_sum < 1.0 {
                     probabilities.push(1.0 - active_probability_sum);
                 }
-                flame::start("multinomial sample");
                 multinomial_sample(1, &probabilities, &mut self.m[0..probabilities.len()], &mut self.rng);
-                flame::end("multinomial sample");
                 assert_eq!(
                     self.m[0..probabilities.len()].iter().sum::<u64>(),
                     1,
                     "sample sum mismatch"
                 );
+                if track_active_reactions {
+                    active_reactions_this_batch += self.m[0..num_outputs].iter().sum::<u64>();
+                }
                 for c in 0..num_outputs {
                     let idx = first_idx + c;
                     let outputs = &self.random_outputs[idx];
@@ -1625,8 +1824,10 @@ impl BatchSimulator {
         // collision reaction itself when one occurred.
         let reactions_this_batch = rxns_before_coll + if do_collision { 1 } else { 0 };
 
+        flame::start("urn commit and sort");
         self.urn.add_vector(&self.updated_counts.config);
         self.urn.sort();
+        flame::end("urn commit and sort");
         // Check that we added the right number of things to the urn.
         assert_eq!(
             self.urn.size - self.n_including_extra_species,
@@ -1640,7 +1841,8 @@ impl BatchSimulator {
         self.n_including_extra_species = self.urn.size;
         self.n = self.n_including_extra_species - self.urn.config[self.crn.k] - self.urn.config[self.crn.w];
 
-        //self.update_enabled_reactions();
+        flame::end("batch step");
+        (reactions_this_batch, active_reactions_this_batch)
     }
 
     /// Perform some Gillespie steps.

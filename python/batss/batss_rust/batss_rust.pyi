@@ -47,14 +47,14 @@ class Simulator(ABC):
     heuristic_gillespie_switching: int
     """
     Which batch/Gillespie switching heuristic to use (BatchSimulator only): 0 = wall-clock
-    measurement (default), 1 = the simpler reaction-count proxy only. Must be set before
-    :meth:`run`. Slated for removal once a single heuristic is settled on.
+    measurement (default), 1 = the simpler reaction-count proxy, 2 = the experimental
+    deterministic prospective-batch score. Must be set before :meth:`run`.
     """
 
     proxy_threshold: float
     """
-    Threshold for the reaction-count proxy rule (BatchSimulator only): prefer Gillespie when the
-    expected number of active reactions in the next batch falls below it.
+    Threshold for the proxy or prospective score (BatchSimulator only): prefer Gillespie when the
+    selected estimate of active reactions in the next batch falls below it.
     """
 
     def run_until_silent(self) -> None:
@@ -103,6 +103,19 @@ class Simulator(ABC):
         """TODO"""
         ...
 
+class EngineCallBenchmark:
+    """Separated timings and work counts from one frozen-state engine call."""
+
+    gillespie: bool
+    preparation_seconds: float
+    setup_seconds: float
+    engine_seconds: float
+    postprocess_seconds: float
+    continuous_time_advanced: float
+    total_reactions: int
+    active_reactions: int
+    k_rebuilt: bool
+
 class BatchSimulator(Simulator):
     """
     Simulator for CRNs using TODO cite paper once citeable.
@@ -133,3 +146,30 @@ class BatchSimulator(Simulator):
     def get_total_propensity(self) -> float:
         """TODO"""
         ...
+
+    def prospective_batch_score(self) -> float:
+        """
+        Experimental deterministic estimate of active reactions in a batch prepared at the
+        prospective K reset target, without rebuilding transition arrays.
+        """
+        ...
+    def benchmark_engine_call(
+        self,
+        gillespie: bool,
+        gillespie_reactions: int | None = None,
+    ) -> EngineCallBenchmark:
+        """
+        Benchmark one batch or Gillespie block from a canonicalized frozen state.
+
+        This mutates the simulator; use a fresh or reset simulator for each paired trial.
+        """
+        ...
+
+    def clear_profile(self) -> None:
+        """Clear Flame spans accumulated by the current thread (no-op without the flm feature)."""
+        ...
+
+    def debug_prospective_n(self) -> int: ...
+    def debug_q(self) -> int: ...
+    def debug_reactant_sets(self) -> int: ...
+    def debug_output_branches(self) -> int: ...

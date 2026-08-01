@@ -1,0 +1,119 @@
+{
+  "anchor_note": "forced Gillespie still executes the simulator's mandatory initial batch",
+  "default_repeats": 2,
+  "extension": {
+    "path": "C:\\Dropbox\\git\\batss\\python\\batss\\batss_rust\\batss_rust.pyd",
+    "sha256": "f5f5f1b8795adb5efb9436a1a73e40bbe74bda604d1da87b99b2434faac06687"
+  },
+  "final_default_seeds": [
+    101,
+    102,
+    103,
+    104,
+    105,
+    106
+  ],
+  "generated_utc": "2026-07-12T16:51:00.992947+00:00",
+  "git_branch": "codex/issue-14-deterministic-switch-experiment",
+  "git_commit": "9ed563b87f70590088ade60d6d7ea63823ed26e4",
+  "pilot_default_seeds": [
+    1,
+    2,
+    3
+  ],
+  "pilot_thresholds": [
+    0.0,
+    20.0,
+    50.0,
+    100.0,
+    150.0,
+    200.0,
+    250.0,
+    300.0,
+    400.0,
+    500.0,
+    750.0,
+    1000.0,
+    1500.0,
+    2000.0,
+    1000000000000.0
+  ],
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD",
+  "python": "3.12.3 | packaged by conda-forge | (main, Apr 15 2024, 18:20:11) [MSC v.1938 64 bit (AMD64)]",
+  "scenarios": [
+    {
+      "crn": "Oregonator",
+      "end_time": 1.0,
+      "family": "oregonator",
+      "initial_n": 100000,
+      "scenario": "oregonator_n1e5"
+    },
+    {
+      "crn": "R\u00f6ssler-Willamowski",
+      "end_time": 1.0,
+      "family": "rossler",
+      "initial_n": 100000,
+      "scenario": "rossler_n1e5"
+    },
+    {
+      "crn": "Shrinking",
+      "end_time": 0.1,
+      "family": "shrinking",
+      "initial_n": 2000000,
+      "scenario": "shrinking_n2e6"
+    },
+    {
+      "crn": "Shrinking no B decay",
+      "end_time": 0.1,
+      "family": "shrinking",
+      "initial_n": 2000000,
+      "scenario": "shrinking_no_b_decay_n2e6"
+    },
+    {
+      "crn": "Shrinking split B decay",
+      "end_time": 0.1,
+      "family": "shrinking",
+      "initial_n": 2000000,
+      "scenario": "shrinking_split_b_decay_n2e6"
+    },
+    {
+      "crn": "Dimerization",
+      "end_time": 0.5,
+      "family": "dimerization",
+      "initial_n": 100000000,
+      "scenario": "dimerization_n1e8"
+    },
+    {
+      "crn": "Lotka-Volterra",
+      "end_time": 1.0,
+      "family": "lotka_volterra",
+      "initial_n": 100000,
+      "scenario": "lotka_volterra_n100000"
+    },
+    {
+      "crn": "Lotka-Volterra",
+      "end_time": 1.0,
+      "family": "lotka_volterra",
+      "initial_n": 1000000,
+      "scenario": "lotka_volterra_n1000000"
+    },
+    {
+      "crn": "Lotka-Volterra",
+      "end_time": 1.0,
+      "family": "lotka_volterra",
+      "initial_n": 10000000,
+      "scenario": "lotka_volterra_n10000000"
+    },
+    {
+      "crn": "Order-3 Brusselator",
+      "end_time": 20.0,
+      "family": "brusselator",
+      "initial_n": 20000,
+      "scenario": "brusselator_n2e4"
+    }
+  ],
+  "selection_note": "wall-clock policy is a reference and never selects T",
+  "source_fingerprint": "a643f62d82e2a28f903663acade174fee38dbb8daecccea9dfcca80068c57ba8",
+  "timer_scope": "one uninterrupted raw BatchSimulator.run call; construction excluded"
+}

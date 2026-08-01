@@ -8,7 +8,7 @@ pub mod urn;
 pub mod util;
 
 use simulator_abstract::Simulator;
-use simulator_crn::{BatchSimulator, SwitchState};
+use simulator_crn::{BatchSimulator, EngineCallBenchmark, SwitchState};
 
 /// A Python module implemented in Rust.
 #[pymodule]
@@ -16,6 +16,7 @@ fn batss_rust(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Simulator>()?;
     m.add_class::<BatchSimulator>()?;
     m.add_class::<SwitchState>()?;
+    m.add_class::<EngineCallBenchmark>()?;
     Ok(())
 }
 
@@ -40,6 +41,7 @@ pub mod flame {
     pub fn spans() -> Vec<Span> {
         vec![]
     }
+    pub fn clear() {}
     pub fn dump_json<W: Write>(_out: &mut W) -> std::io::Result<()> {
         Ok(())
     }

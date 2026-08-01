@@ -1,0 +1,33 @@
+{
+  "best_top_two_family_log_objective": 0.07306484216755918,
+  "final_policies": [
+    "forced_batch",
+    "threshold_100",
+    "threshold_250",
+    "threshold_500",
+    "threshold_1000",
+    "threshold_2000",
+    "forced_gillespie_after_initial_batch",
+    "wallclock_timing"
+  ],
+  "final_thresholds": [
+    0.0,
+    100.0,
+    250.0,
+    500.0,
+    1000.0,
+    2000.0,
+    1000000000000.0
+  ],
+  "plateau_geometric_center": 447.213595499958,
+  "plateau_relative_tolerance": 1.05,
+  "plateau_thresholds": [
+    400.0,
+    500.0
+  ],
+  "selected_policy": "threshold_500",
+  "selected_threshold": 500.0,
+  "selection_generated_utc": "2026-07-12T16:48:30.761164+00:00",
+  "source_fingerprint": "a643f62d82e2a28f903663acade174fee38dbb8daecccea9dfcca80068c57ba8",
+  "wallclock_excluded_from_selection": true
+}
