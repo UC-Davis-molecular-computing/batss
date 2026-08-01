@@ -1,2 +1,7 @@
 [toolchain]
 channel = "nightly"
+# Ship a rust-analyzer matched to the pinned nightly, so VS Code stops falling back to its
+# bundled one and warning that the toolchain is too old. Note this does NOT cure the
+# "`Python<'^0>: Copy` has escaping bound vars" panic on pyo3 code — the bundled and the
+# rustup-supplied analyzer both hit it; see CONTRIBUTING.md's troubleshooting section.
+components = ["rust-analyzer"]

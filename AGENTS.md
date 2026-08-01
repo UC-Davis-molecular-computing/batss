@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 **At the start of every session, read [`CONTRIBUTING.md`](CONTRIBUTING.md) before doing anything
 else.** It documents the build/toolchain gotchas (nightly Rust pin, Dropbox/`CARGO_TARGET_DIR`,

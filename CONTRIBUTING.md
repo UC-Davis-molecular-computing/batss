@@ -187,6 +187,92 @@ cargo tree -i pyo3     # expect a single pyo3 version, contributed by batss + nu
 
 > **Why this bites at *release* time — the CI `python-version: "3.x"` trap.** The build workflow uses `actions/setup-python` with `python-version: 3.x`, which resolves to the *latest stable* CPython on the runner — and that advances over time. Combined with `maturin build --find-interpreter` (which builds a wheel for **every** interpreter it finds), a runner Python newer than pyo3 supports fails the whole release job on **every** platform, even though nothing in batss changed. This is exactly what threatened v1.0.3: v1.0.0–1.0.2 were released in Aug 2025, before CPython 3.14; by mid-2026 `3.x` resolved to 3.14, which pyo3 0.24 could not build. The fix was moving to pyo3 0.28. Keep pyo3/numpy current (or pin the CI Python) so a new CPython release doesn't silently break publishing.
 
+### Troubleshooting a broken dev environment
+
+Symptoms below are all things that have actually bitten this project, typically on a machine that
+has sat idle while development happened elsewhere. Each is *environment* breakage — the code is
+fine, so don't go looking for a bug in `src/`.
+
+> **`maturin develop` succeeds but your Rust changes have no effect** — and Python raises
+> `AttributeError: 'builtins.BatchSimulator' object has no attribute '<name>'` for a method that
+> plainly exists in `src/simulator_crn.rs` inside the `#[pymethods]` block and is declared in
+> `batss_rust.pyi`. **This is the nastiest failure in this list, because nothing reports an
+> error.** maturin builds an **abi3** wheel (`batss-*-cp310-abi3-win_amd64.whl`), which installs
+> as *untagged* `batss_rust.pyd`. But CPython's extension finder checks *version-tagged* names
+> first, so a leftover `batss_rust.cp313-win_amd64.pyd` from a pre-abi3 build silently shadows
+> every rebuild you do. Confirm which file is actually loaded:
+>
+> ```
+> python -c "from batss.batss_rust import batss_rust as m; print(m.__file__)"
+> ```
+>
+> If that prints anything other than plain `batss_rust.pyd`, rename the tagged file aside (the
+> convention in `python/batss/batss_rust/` is a `.old.pyd` suffix; `*.pyd` is gitignored there, so
+> this is a local-only change) and re-run. Only `batss_rust.pyd` should remain active.
+
+> **`did not find executable at '...\uv\python\cpython-X.Y.Z-windows-x86_64-none\python.exe'`,**
+> followed by pyo3's `error: Python script failed`. The venv's base interpreter is gone: uv prunes
+> old patch releases from its managed-Python store, but `.venv/pyvenv.cfg`'s `home =` line still
+> points at the pruned one, and `.venv/Scripts/python.exe` is a uv *trampoline* that resolves
+> through it. Everything Python-facing dies at once — tests, Jupyter, `maturin develop` — and
+> because `.vscode/settings.json` passes that interpreter to pyo3 as `PYO3_PYTHON`, so does
+> `cargo check`, which is why **rust-analyzer goes completely dark and reports it as a Rust
+> error**. Read the exact version out of `.venv/pyvenv.cfg` and reinstall precisely that one:
+>
+> ```
+> uv self update                 # an old uv's manifest may not list the version you need
+> uv python install 3.13.13      # <- the exact version_info from pyvenv.cfg
+> ```
+>
+> This restores the `home` path verbatim, so the venv and its installed packages keep working
+> untouched. Only recreate the venv (`uv venv --python 3.13`, reinstall, rebuild) if that exact
+> patch release is genuinely unavailable — a *different* minor version cannot back the existing
+> `site-packages`, whose compiled extensions carry a `cp3NN` ABI tag.
+
+> **`maturin failed: Failed to find pip`.** The venv was created by uv and has no `pip`. Use
+> `maturin develop --release --uv`, as maturin's own error message suggests.
+
+> **VS Code warns "your workspace uses a rust-toolchain file with a toolchain too old for the
+> extension shipped rust-analyzer".** The pin in `rust-toolchain.toml` is the floating `nightly`
+> channel, so a machine that hasn't built in a long time can be a year behind the rust-analyzer
+> that VS Code ships. `rust-toolchain.toml` requests `components = ["rust-analyzer"]` so rustup
+> supplies a *version-matched* analyzer; keep the toolchain current so that analyzer is recent too:
+>
+> ```
+> rustup update nightly
+> rustup component list --toolchain nightly | grep rust-analyzer   # expect "(installed)"
+> ```
+
+> **rust-analyzer panics with "`Python<'^0>: Copy` has escaping bound vars, so it cannot be
+> wrapped in a dummy binder",** and `textDocument/diagnostic` fails for `src/simulator_crn.rs`.
+> **This is an upstream rust-analyzer bug, not a problem with the code** — a crash in the
+> next-generation trait solver it vendors from rustc, hit while borrow-checking the higher-ranked
+> `Python::attach(|py| ...)` closures that pyo3 requires (`Python<'py>` carries a bound lifetime,
+> and the solver asserts when asked to prove `Python<'^0>: Copy` before that lifetime is
+> instantiated). It is **not** fixed by matching the analyzer to the toolchain — both the bundled
+> and the rustup-supplied analyzer panic identically — and no setting disables the new solver.
+> The workaround in `.vscode/settings.json` is:
+>
+> ```jsonc
+> "rust-analyzer.diagnostics.enable": false
+> ```
+>
+> That switch turns off only rust-analyzer's *native* diagnostics. `cargo check` (flycheck) still
+> reports real rustc errors and warnings, and completion, hover, goto-definition and inlay hints
+> are unaffected — so in practice you lose little. Worth retrying after a rust-analyzer update; if
+> the panic is gone, delete the setting. A narrower alternative that may or may not work,
+> depending on whether the analyzer still runs borrowck before filtering, is
+> `"rust-analyzer.diagnostics.disabled": ["need-mut", "unused-mut"]`.
+
+> **`error: failed to remove ...\target\debug\deps\*.rcgu.o: ... used by another process
+> (os error 32)` coming from rust-analyzer** (not from your own `cargo` runs). rust-analyzer runs
+> its own `cargo check` and, by default, writes to `target/` inside the repo — which is the
+> synced-folder hazard described above. `.vscode/settings.json` sets `CARGO_TARGET_DIR` under
+> `rust-analyzer.cargo.extraEnv` to move that output out of the synced tree. Two caveats: the path
+> there is **absolute and machine-specific**, so adjust it on a new machine; and it is
+> deliberately *not* the same directory used for `maturin develop`, since sharing one would make
+> flycheck and your builds block on the same cargo lock.
+
 ## Deploying to PyPI
 
 Releasing is driven by the [GitHub CLI](https://cli.github.com/) (`gh`) plus the helper scripts in [`scripts/`](scripts/) — a Bash version (`.sh`, for macOS/Linux/WSL/Git Bash) and a PowerShell version (`.ps1`, for Windows) of each. The manual web-UI steps remain documented under "Doing it by hand" below.

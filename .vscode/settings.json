@@ -38,13 +38,26 @@
     "rust-analyzer.cargo.extraEnv": {
         "PYTHON_SYS_EXECUTABLE": "${workspaceFolder}/.venv/Scripts/python.exe",
         "PYO3_PYTHON": "${workspaceFolder}/.venv/Scripts/python.exe",
-        "VIRTUAL_ENV": "${workspaceFolder}/.venv"
+        "VIRTUAL_ENV": "${workspaceFolder}/.venv",
+        // Keep rust-analyzer's check output out of the Dropbox-synced tree, which
+        // intermittently locks target/debug/deps/*.o and fails the build with os error 32.
+        // Deliberately NOT the same directory maturin uses (batss-cargo-target), so
+        // flycheck and `maturin develop` don't contend for the same cargo lock.
+        "CARGO_TARGET_DIR": "C:\\Users\\pexat\\AppData\\Local\\batss-ra-target"
     },
     "rust-analyzer.server.extraEnv": {
         "PYTHON_SYS_EXECUTABLE": "${workspaceFolder}/.venv/Scripts/python.exe",
         "PYO3_PYTHON": "${workspaceFolder}/.venv/Scripts/python.exe",
         "VIRTUAL_ENV": "${workspaceFolder}/.venv"
     },
+    // Upstream rust-analyzer bug: its vendored next-gen trait solver panics with
+    // "`Python<'^0>: Copy` has escaping bound vars" while borrow-checking the higher-ranked
+    // `Python::attach(|py| ...)` closures in src/simulator_crn.rs, which kills every
+    // textDocument/diagnostic request for that file. There is no setting to disable the new
+    // solver, so turn off rust-analyzer's *native* diagnostics; `cargo check` (flycheck) still
+    // reports real rustc errors and warnings, and completion/hover/goto-def are unaffected.
+    // Revisit once rust-analyzer fixes the panic.
+    "rust-analyzer.diagnostics.enable": false,
     "[rust]": {
         "editor.defaultFormatter": "rust-lang.rust-analyzer",
 		"editor.tabSize": 4,
