@@ -531,6 +531,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--repeats", type=int)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--gillespie-reactions", type=int, default=5_000)
+    parser.add_argument(
+        "--measure-gillespie-all",
+        action="store_true",
+        help=(
+            "also time the Gillespie engine for the families that were designed to isolate batch "
+            "cost (collision_grid, dense_support_control, composition_control, real_crn_initial). "
+            "Needed to identify the C_Gillespie denominator of the separate-cost threshold model; "
+            "off by default so the original paired-family CSVs stay reproducible."
+        ),
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     if args.repeats is None:
@@ -547,6 +557,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
     cases = profile_cases()
+    if args.measure_gillespie_all:
+        cases = [replace(profile_case, measure_gillespie=True) for profile_case in cases]
     if args.mode == "components":
         collect_components(cases, repeats=args.repeats, seed=args.seed, output=args.output.resolve())
     else:

@@ -731,6 +731,209 @@ pilot decision, per-CRN
 [`switching_policy_comparison_metadata.json`](switching_policy_comparison_metadata.json)
 environment/source fingerprint.
 
+## Separate-cost threshold model (2026-08-01)
+
+This tests the "Revised research hypothesis" above: instead of regressing `T` directly, fit
+`C_batch` and `C_Gillespie` **separately** with nonnegative coefficients and take the ratio only
+afterwards. The result is that the decomposition works, and that the earlier preference for the
+population-only model `T_logN` was an artifact of an evaluation metric that could not discriminate.
+
+### The measurement gap that had to be closed first
+
+`profile_batch_costs.py` set `measure_gillespie=True` for only the `matched_shrinking` and
+`branch_count_control` families, so 30 of 37 profile cases had **no denominator measured**. Those 30
+are exactly the cases that vary `q`, `o`, `g`, and `N`, so `C_Gillespie`'s dependence on them was
+unidentifiable. The new opt-in flag `--measure-gillespie-all` times both engines for every case;
+without it the script reproduces the original CSVs byte-for-byte.
+
+### Data
+
+37 paired states, 6 families, seeds 1 and 2, 301 interleaved repeats, 5,000-reaction Gillespie
+blocks — the original timing protocol, now applied to every case:
+
+```powershell
+python -B benchmark/profile_batch_costs.py timings --repeats 301 --seed 1 `
+    --gillespie-reactions 5000 --measure-gillespie-all `
+    --output benchmark/batch_cost_profile_timings_allg.csv
+# ...and again with --seed 2 --output benchmark/batch_cost_profile_timings_allg_seed2.csv
+python benchmark/threshold_cost_model.py `
+    --timings benchmark/batch_cost_profile_timings_allg.csv `
+    --timings benchmark/batch_cost_profile_timings_allg_seed2.csv `
+    --json-out benchmark/results/threshold_cost_model_fit.json
+```
+
+> [!IMPORTANT]
+> This collection ran on a **different CPU and a newer nightly** than the 2026-07-12 profile, and is
+> uniformly 60-75% slower in absolute terms. That is the "repeat on another CPU" validation the
+> earlier section asked for: the *ordering and structure* of `T*` replicated (for example `T*` still
+> falls monotonically from about 622 to 342 as split-`B` channels go 3 -> 10), but absolute
+> microsecond costs did not. **Do not pool the `_allg` CSVs with the 2026-07-12 CSVs.** Coefficients
+> below are machine- and build-specific; the *form* is the portable claim, not the numbers.
+
+### Fitted costs
+
+Both fits minimize relative error (rows scaled by `1/target`) under nonnegativity, so no term can
+claim negative work. NNLS dropped the terms marked below, which is itself informative.
+
+`C_batch` (us per batch call), R^2 = 0.954, median relative error 3.6%:
+
+| term | coefficient | note |
+|---|---:|---|
+| `const` | 4.267 | fixed per-call overhead |
+| `o` | 1.883 | |
+| `o log2(N)` | 0.0644 | order-dependent collision-search work |
+| `[g >= 1]` | 4.157 | the large generative jump |
+| `g log2(N)` | 0.0636 | magnitude of `g` matters, confirming the old indicator was too coarse |
+| `sum_{d=1}^{o} q^d` | 0.0731 | dense recursive sampling nodes |
+| `score` | 0.00231 | active-lane work |
+| `B` | 0.642 | channel alternatives |
+| `log2(N)`, `g`, `q^o`, `W_lanes`, `q` | 0 | dropped |
+
+`C_Gillespie` (us per exact reaction), R^2 = 0.994, median relative error 2.6%:
+
+| term | coefficient | note |
+|---|---:|---|
+| `const` | 0.01444 | |
+| `B (q - 2)` | 0.000917 | dense rate evaluation |
+| `B o` | 0.000957 | per-channel reactant work |
+| `(q - 2)` | 0.000622 | dense jump |
+| `B`, `C_sync/H` | 0 | dropped; at `H = 5000` the sync term is negligible |
+
+`q^o` was dropped only because `sum_{d=1}^{o} q^d` is nearly collinear with it and absorbed the
+effect; this is a reparameterization, not evidence that terminal-lane scanning is free.
+
+### The ratio predicts `T*`; the population-only model does not
+
+| predictor of `T*` | median rel. error | max rel. error | correlation with `T*` |
+|---|---:|---:|---:|
+| separate-cost ratio, in-sample | 0.036 | 0.163 | **0.986** |
+| separate-cost ratio, leave-one-family-out | 0.189 | 0.652 | **0.944** |
+| `T_logN` refit on this CPU (`713.8 + 4.40 log2 N`) | 0.276 | 2.644 | 0.059 |
+| `T_logN` seed-1 coefficients (`460.2 + 8.35 log2 N`) | 0.321 | 1.906 | 0.059 |
+| constant `T = 500` | 0.404 | 1.242 | n/a (constant) |
+
+Measured `T*` spans 223 to 1524 (6.8x) across these states. An affine function of `log2(N)` has
+**essentially no correlation with it** — it cannot represent the structural variation at all.
+
+### Why the earlier evaluation preferred `T_logN`
+
+The regret metric is **degenerate on frozen-state data**. Only 8 of 37 states lie within 2x of their
+own break-even and only 6 prefer batch; the rest sit 10x-800x away from the boundary, where every
+candidate threshold in a wide band makes the same decision. Consequently the separate-cost ratio,
+`T_logN`, `T = 500`, **and the oracle `T*` itself** all score mean/worst regret 1.0000/1.0000 on
+these states. Regret cannot rank predictors here; threshold-prediction accuracy can. The earlier
+grouped-regret comparison that made `T_logN` look best (1.000/1.000) was measuring the same
+degeneracy, not predictive quality.
+
+### Controlled structural contrasts
+
+Both families hold `N`, `o`, `g`, and the prospective score fixed, so every change in `T*` is
+structural. `T_hat` is the leave-one-family-out prediction, i.e. the family was absent from training.
+
+| contrast | varied | `T*` | `T_hat` (held out) |
+|---|---|---:|---:|
+| `dense_support` | `q` = 4, 6, 8, 12 | 675 -> 463 -> 333 -> 223 | 700 -> 571 -> 477 -> 368 |
+| `branch_count` | `B` = 3, 4, 6, 10 | 622 -> 545 -> 475 -> 342 | 603 -> 557 -> 491 -> 415 |
+
+Direction and ordering are recovered in both, with the slope under-predicted when the family
+supplying that feature's only variation is held out — expected, and the clearest statement of what
+the design still lacks.
+
+### Near-boundary held-out decision test
+
+The section above establishes that the ratio predicts `T*` well but *cannot* be ranked by regret,
+because the profile states are far from their boundaries. This experiment removes that excuse by
+constructing states that sit on the boundary, and it is the test that could have falsified the model.
+
+`near_boundary_states.py` exploits an exact scaling law. `inits_from_n` scales every initial count
+proportionally and `_make_sim` uses `volume = initial_n`, so composition -- and therefore the active
+probability -- is invariant under scaling `n`; since `E[L]` is proportional to `sqrt(N)`,
+
+```text
+score(n) = score(n_ref) * sqrt(n / n_ref)     (verified exact to 4 significant figures)
+```
+
+so solving `score(n) = ratio * T*` needs a single Newton step, `n = n_ref (ratio T* / score_ref)^2`,
+with only `T*` re-measured because it drifts logarithmically. For 18 base CRNs it targets
+`score/T*` of 0.6, 1.0, and 1.6, bracketing each boundary from both sides.
+
+| state set | states | within 2x of break-even | prefer batch |
+|---|---:|---:|---:|
+| profile matrix (training) | 37 | 8 | 6 |
+| near-boundary (held out) | 46 | **44** | 14 |
+
+The held-out set spans `score/T*` of 0.327 to 1.67 and `T*` of 223 to **3397** -- note the top of
+that range is more than double the training maximum of 1524, so the ratio model is **extrapolating**,
+not interpolating. Fitting uses the 37 profile states only; every predictor below is then applied
+unchanged, including the constant and `T_logN` baselines, which are selected/fit on the same training
+states so the comparison is fair.
+
+| predictor | mean regret | worst regret | misclassified | median rel. error on `T*` |
+|---|---:|---:|---:|---:|
+| **separate-cost ratio** | **1.0094** | **1.309** | **3 / 46** | **0.087** |
+| constant selected on train (`T = 604`) | 1.1124 | 2.259 | 13 / 46 | 0.293 |
+| constant `T = 500` | 1.1029 | 2.259 | 14 / 46 | 0.381 |
+| `T_logN` fit on train (`714 + 4.40 log2 N`) | 1.1153 | 2.259 | 10 / 46 | 0.421 |
+| oracle `T*` (unattainable) | 1.0000 | 1.000 | 0 / 46 | 0.000 |
+
+Regret is now discriminating -- the oracle scores 1.0000 while every baseline sits near 1.11 -- and
+the ratio model captures most of the available gain: **mean regret falls from about 11% to 0.9%,
+worst case from 2.26x to 1.31x, and misclassifications from 10-14 down to 3.**
+
+Where each predictor fails is the informative part:
+
+- The ratio model's three errors are all at `score/T* ~ 1`, where the two engines are genuinely
+  near-tied and being wrong is nearly free (regrets 1.309, 1.118, 1.006). Its single worst state,
+  `collision_o3_g0` at `T* = 2541`, is an `o = 3` extrapolation past the training range where it
+  under-predicts (`T_hat = 1361`).
+- Every baseline fails on the same **structural** extremes, in both directions: `collision_o3_g2`
+  (`T* = 3397`, constant says 604 -- batches when it should not) and `dense_support_q8`/`q12`
+  (`T* = 349`/`229`, constant says 604 -- uses Gillespie when it should batch). No constant can be
+  simultaneously right about a CRN needing 3397 and one needing 229.
+- `T_logN` misclassifies slightly fewer states than the constant (10 vs 13) but has both higher mean
+  regret and by far the worst threshold error (0.42). It is not tracking structure; it is
+  effectively a constant with a small population tilt, and its count advantage is luck of placement.
+
+### Honest limitations
+
+- **Held-out slopes are shallow where a family is the sole source of a feature.** Holding out
+  `dense_support_control` removes all `q` variation (median error 33%, worst 65%); holding out
+  `collision_grid` removes all `o = 3` and all `N` variation (median 25%). Fixing this needs a
+  second, independent family varying each of `q` and `o`, not more states inside existing families.
+- **The profile matrix is deliberately adversarial to a population-only model**, since two families
+  hold `N` fixed while varying structure. It is the right test for structure sensitivity but is not
+  a random sample of states a real trajectory visits. The near-boundary test above addresses this
+  directly: its states are placed by scaling `n` on real and controlled CRNs alike, and the
+  structural advantage survives.
+- **The near-boundary states are still frozen states, not trajectories.** They measure the local
+  steady crossover with setup excluded. A whole run also pays mode duration, rebuild and switching
+  costs, and truncation, which is why `T = 500` can look fine end-to-end while being a poor estimate
+  of any individual `T*`. Nothing here supersedes the end-to-end comparison.
+- **Two CRNs could not be brought to their boundary at all.** Brusselator needs `N` far beyond the
+  1e10 cap (score reaches only 363 against `T* ~ 3000`), and Oregonator only reaches `score/T* =
+  0.33` at `n = 1e10`. Both are excluded and reported by the harness. This is a real property of
+  stiff, low-active-fraction CRNs, and it means the order-3 corner of the test set is thin.
+- 37 training states, 6 families, one CPU, one build. Coefficients are not portable; the functional
+  form is the claim.
+- **Not yet wired into the simulator.** `T_hat` is a Python-side predictor. Making it a selector
+  requires implementing both cost forms in `SwitchState` and re-running the end-to-end held-out
+  comparison; nothing here changes the default, which remains `HEURISTIC_WALLCLOCK`.
+
+### What to do next
+
+1. ~~Build a near-boundary frozen-state set so decision regret becomes discriminating.~~ **Done**
+   (`near_boundary_states.py`); the ratio model passed, cutting mean regret from ~11% to 0.9%.
+2. Add one independent `q`-varying and one `o`-varying family so no feature depends on a single
+   family, then re-check the held-out slopes. The `o = 3` under-prediction at `T* > 2000` is the
+   clearest remaining gap, and the only order-3 CRNs available are the ones that cannot reach their
+   own boundary.
+3. Implement `T_hat` as `HEURISTIC_COST_MODEL` in Rust. Both cost forms are cheap: no `f128`, no
+   allocation, and every input (`N`, `q`, `o`, `g`, `B`, `score`) is already computed by the
+   prospective selector. The per-machine coefficients are the open design question — either
+   calibrate once at build time or ship a profiled default and re-fit on demand.
+4. Then run `switching_policy_comparison.py` end-to-end against the timing policy and fixed
+   `T = 500` on held-out seeds. Frozen-state regret does not by itself justify changing the default.
+
 ## Where things live / how to test
 
 - **Code:** `src/simulator_crn.rs`. `SwitchState` holds all switching state (config + EMAs + probe
@@ -750,7 +953,20 @@ environment/source fingerprint.
 - **Profiling harness:** `benchmark/profile_batch_costs.py`; `components` attributes coarse Flame
   phases, while `timings` measures uninstrumented batch-call and Gillespie-per-reaction costs with
   warmup, paired seeds, alternating engine order, and globally interleaved cases. Its six saved
-  `batch_cost_profile_*.csv` files contain both seed passes and their summaries.
+  `batch_cost_profile_*.csv` files contain both seed passes and their summaries. Pass
+  `--measure-gillespie-all` to time Gillespie for every case, not just the two paired Shrinking
+  families; the `batch_cost_profile_timings_allg*.csv` files were collected that way.
+- **Separate-cost model harness:** `benchmark/threshold_cost_model.py`; fits `C_batch` and
+  `C_Gillespie` independently with nonnegative least squares, forms `T_hat` as their ratio, and
+  reports leave-one-family-out threshold accuracy plus the constant and `T_logN` baselines. Note it
+  reports **both** threshold-prediction accuracy and decision regret, because regret alone is
+  degenerate on frozen-state data (see the 2026-08-01 section). Pass `--evaluate-timings` to fit on
+  one CSV set and score an untouched held-out set.
+- **Near-boundary harness:** `benchmark/near_boundary_states.py`; solves for the population that
+  puts each CRN's prospective score at a requested multiple of its measured break-even, then times
+  both engines there. Use it to generate decision test sets where regret can actually rank
+  predictors. It runs the population search once and reuses it across `--timing-seeds` so the seed
+  passes stay poolable, and it reports CRNs whose boundary is unreachable below `n = 1e10`.
 - **End-to-end comparison harness:** `benchmark/switching_policy_comparison.py`; it records raw
   timing/prospective-policy runs, selects `T` only from pilot seeds, and evaluates the frozen
   timing policy, selected `T`, and deliberately high/low controls on held-out seeds.
