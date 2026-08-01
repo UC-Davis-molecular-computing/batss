@@ -1,0 +1,101 @@
+{
+  "thresholds": {
+    "oregonator_n1e5": 508.38357055706695,
+    "rossler_n1e5": 460.9509027986007,
+    "shrinking_n2e6": 590.5965783523311,
+    "shrinking_no_b_decay_n2e6": 631.1665270258126,
+    "shrinking_split_b_decay_n2e6": 539.3869913044034,
+    "dimerization_n1e8": 1008.7822031060477,
+    "lotka_volterra_n100000": 716.7923960387063,
+    "lotka_volterra_n1000000": 767.0622102295016,
+    "lotka_volterra_n10000000": 874.6990353728594,
+    "brusselator_n2e4": 925.428283866978
+  },
+  "seeds": [
+    201,
+    202,
+    203,
+    204,
+    205,
+    206
+  ],
+  "repeats": 3,
+  "summary": {
+    "wallclock_timing": {
+      "central": 1.0,
+      "worst_family": 1.0,
+      "worst_scenario": 1.0,
+      "regret_vs_best_tested": 1.1227693421831808,
+      "worst_regret_vs_best_tested": 2.2265364308342135,
+      "per_scenario": {
+        "oregonator_n1e5": 1.0,
+        "rossler_n1e5": 1.0,
+        "shrinking_n2e6": 1.0,
+        "shrinking_no_b_decay_n2e6": 1.0,
+        "shrinking_split_b_decay_n2e6": 1.0,
+        "dimerization_n1e8": 1.0,
+        "lotka_volterra_n100000": 1.0,
+        "lotka_volterra_n1000000": 1.0,
+        "lotka_volterra_n10000000": 1.0,
+        "brusselator_n2e4": 1.0
+      }
+    },
+    "constant_670": {
+      "central": 0.9632301340523417,
+      "worst_family": 1.2845805727649673,
+      "worst_scenario": 1.2845805727649673,
+      "regret_vs_best_tested": 1.0814852639809647,
+      "worst_regret_vs_best_tested": 1.2845805727649673,
+      "per_scenario": {
+        "oregonator_n1e5": 0.8644811978597089,
+        "rossler_n1e5": 1.2845805727649673,
+        "shrinking_n2e6": 1.1097778758447139,
+        "shrinking_no_b_decay_n2e6": 0.7987812442392573,
+        "shrinking_split_b_decay_n2e6": 1.1885992258140772,
+        "dimerization_n1e8": 1.003356205414439,
+        "lotka_volterra_n100000": 0.4850440828444461,
+        "lotka_volterra_n1000000": 0.9279877849487543,
+        "lotka_volterra_n10000000": 1.0132441040009403,
+        "brusselator_n2e4": 0.9151578621024989
+      }
+    },
+    "constant_500": {
+      "central": 0.9232109513995234,
+      "worst_family": 1.141485859081584,
+      "worst_scenario": 1.141485859081584,
+      "regret_vs_best_tested": 1.0365529525991513,
+      "worst_regret_vs_best_tested": 1.141485859081584,
+      "per_scenario": {
+        "oregonator_n1e5": 0.8936984091675003,
+        "rossler_n1e5": 1.141485859081584,
+        "shrinking_n2e6": 0.9370466259926415,
+        "shrinking_no_b_decay_n2e6": 0.8152956630520604,
+        "shrinking_split_b_decay_n2e6": 0.9399599609952132,
+        "dimerization_n1e8": 0.9942477603188404,
+        "lotka_volterra_n100000": 0.48907058472016046,
+        "lotka_volterra_n1000000": 0.900667827681921,
+        "lotka_volterra_n10000000": 0.9212642727701489,
+        "brusselator_n2e4": 0.920762252849426
+      }
+    },
+    "cost_model": {
+      "central": 0.9262163231882511,
+      "worst_family": 1.0852680037957025,
+      "worst_scenario": 1.0852680037957025,
+      "regret_vs_best_tested": 1.039927291905397,
+      "worst_regret_vs_best_tested": 1.0852680037957025,
+      "per_scenario": {
+        "oregonator_n1e5": 0.8685576811648256,
+        "rossler_n1e5": 1.0852680037957025,
+        "shrinking_n2e6": 1.0033693118526026,
+        "shrinking_no_b_decay_n2e6": 0.8107601107917625,
+        "shrinking_split_b_decay_n2e6": 1.009259204538739,
+        "dimerization_n1e8": 0.985823872301631,
+        "lotka_volterra_n100000": 0.44912806552432255,
+        "lotka_volterra_n1000000": 0.9556014107798804,
+        "lotka_volterra_n10000000": 0.9903169607192014,
+        "brusselator_n2e4": 0.9650442362666541
+      }
+    }
+  }
+}

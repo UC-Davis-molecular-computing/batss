@@ -894,6 +894,57 @@ Where each predictor fails is the informative part:
   regret and by far the worst threshold error (0.42). It is not tracking structure; it is
   effectively a constant with a small population tilt, and its count advantage is luck of placement.
 
+### End-to-end check: does the CRN dependence actually change wall-clock? (2026-08-01)
+
+The frozen-state results say the break-even rate varies 15x, which predicts that no constant can be
+right everywhere. This experiment asks the practical follow-up: **does that matter for real
+run times?** `end_to_end_threshold_check.py` runs the ten comparison scenarios under the wall-clock
+timing policy, a constant `T = 670`, a constant `T = 500`, and a per-CRN `T_hat` from the cost model
+evaluated at each scenario's initial state, on six fresh seeds with three repeats each (720 runs).
+
+> [!CAUTION]
+> **Seven of the ten scenarios are policy-equivalent.** `T = 670`, `T = 500`, and the cost model
+> execute the *identical* mode sequence there -- same batch/Gillespie/switch counts, hence the same
+> random stream and the same work. Their timing differences on those rows are pure noise, and the
+> measured noise floor is **1.7% to 10.8%**. Any aggregate over all ten scenarios is therefore
+> mostly averaging noise, and differences below about 10% between deterministic policies are not
+> measurable on this suite.
+
+Only `rossler_n1e5`, `shrinking_n2e6`, and `shrinking_split_b_decay_n2e6` are genuinely different
+policies. Restricting to those, with per-seed medians paired against the timing policy:
+
+| scenario | timing | `T = 670` | `T = 500` | cost model |
+|---|---:|---:|---:|---:|
+| `rossler_n1e5` | **3.488 s** | 4.481 (1.288x) | 3.982 (1.147x) | 3.786 (1.098x) |
+| `shrinking_n2e6` | 0.0655 | 0.0727 (1.101x) | **0.0614 (0.937x)** | 0.0657 (1.045x) |
+| `shrinking_split_b_decay_n2e6` | 0.0677 | 0.0804 (1.235x) | **0.0636 (0.929x)** | 0.0683 (1.009x) |
+| **central (these 3 only)** | 1.000x | 1.191x | **0.991x** | 1.028x |
+| **worst (these 3 only)** | 1.000x | 1.287x | 1.126x | **1.076x** |
+
+The paired seed counts are consistent, not marginal: on Rössler the ordering
+`cost model < 500 < 670` holds in all six seeds and *none* of the three beats timing in any seed;
+`T = 500` beats timing in 5/6 seeds on Shrinking and 4/6 on split-B Shrinking.
+
+Three conclusions, none of which is what the frozen-state work alone would have predicted:
+
+1. **`T = 670` is a poor threshold.** It is the worst policy on every scenario that can tell the
+   difference (1.19x central, 1.29x worst), because it pushes Rössler and Shrinking through far too
+   much Gillespie. A rate measured on one CRN must not be applied to others -- which is the whole
+   point, but it is worth stating that the specific number is bad, not merely unjustified.
+2. **`T = 500` remains an excellent constant**, essentially tying the timing policy centrally
+   (0.991x) on the discriminating rows.
+3. **The cost model buys worst-case robustness, not average speed.** It has the best worst case
+   (1.076x vs 1.126x and 1.287x) but is slightly behind `T = 500` centrally. That is exactly the
+   frozen-state story carried through: the model helps where structure is extreme, and these ten
+   scenarios contain no extreme structure -- the per-CRN `T_hat` values span only 461 to 1009.
+
+**This suite cannot settle the question.** Three discriminating scenarios, two of which are the same
+CRN family, against a noise floor of up to 10.8%. Demonstrating that structure-aware thresholds pay
+off end-to-end requires scenarios whose *trajectories actually pass near their own boundary* and
+whose structures differ sharply -- the `dense_support`-style high-`q` and order-3 CRNs, run as full
+trajectories rather than frozen states. Until then, `T = 500` is the defensible practical choice and
+the cost model is the better-understood one.
+
 ### Honest limitations
 
 - **Held-out slopes are shallow where a family is the sole source of a feature.** Holding out
@@ -962,6 +1013,10 @@ Where each predictor fails is the informative part:
   reports **both** threshold-prediction accuracy and decision regret, because regret alone is
   degenerate on frozen-state data (see the 2026-08-01 section). Pass `--evaluate-timings` to fit on
   one CSV set and score an untouched held-out set.
+- **End-to-end threshold check:** `benchmark/end_to_end_threshold_check.py`; times whole runs under
+  the timing policy, fixed thresholds, and a per-CRN cost-model threshold, and reports both the
+  ratio to timing and the regret against the best policy actually achieved. Always check its mode
+  signatures before believing a difference: most scenarios are policy-equivalent.
 - **Near-boundary harness:** `benchmark/near_boundary_states.py`; solves for the population that
   puts each CRN's prospective score at a requested multiple of its measured break-even, then times
   both engines there. Use it to generate decision test sets where regret can actually rank
