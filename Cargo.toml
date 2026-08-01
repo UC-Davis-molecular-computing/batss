@@ -45,3 +45,15 @@ compensated-summation = "0.3.1"
 rebop = { version = "0.9.7", default-features = false }
 serde_json = "1.0"
 tqdm = "0.8"
+
+# EXPERIMENT (issue #13): point rebop at a local fork of v0.9.7 that adds
+# `Gillespie::advance_until_or_reactions(tmax, max_reactions)` -- the upstream loop with one extra
+# stopping condition, so a Gillespie block can be budgeted by reaction count instead of by a
+# duration inferred from the entry propensity.
+#
+# This is a *path* patch and therefore only works on a checkout that also has the fork beside it;
+# CI and other machines will fail to resolve it. Before merging anywhere, replace it with a git
+# dependency on the published fork:
+#     rebop = { git = "https://github.com/<org>/rebop", branch = "num-reactions-stopping-condition" }
+[patch.crates-io]
+rebop = { path = "../rebop" }

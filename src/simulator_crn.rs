@@ -561,6 +561,26 @@ pub struct BatchSimulator {
     /// Number of K resets performed in run()'s batch branch (observability; used to compare policies).
     #[pyo3(get)]
     pub k_resets: u64,
+
+    /// How a Gillespie block decides when to stop (issue #13 experiment).
+    ///
+    /// `false` (default) is the historical behaviour: convert the target reaction count into a
+    /// duration using the total propensity *measured on entry*, then run rebop until that time.
+    /// That conversion assumes the propensity is constant across the block, so it overshoots the
+    /// intended count whenever the propensity rises and undershoots when it falls.
+    ///
+    /// `true` budgets the block directly in reactions via
+    /// `Gillespie::advance_until_or_reactions`, which stops after exactly `sqrt(n)` reactions or at
+    /// `t_max`, whichever comes first.
+    #[pyo3(get, set)]
+    pub gillespie_block_by_reactions: bool,
+
+    /// Total reactions executed inside `gillespie_steps`, and the count those blocks aimed for.
+    /// Their ratio is the realized over/undershoot of the block-sizing rule (observability only).
+    #[pyo3(get)]
+    pub gillespie_reactions_executed: u64,
+    #[pyo3(get)]
+    pub gillespie_reactions_targeted: u64,
 }
 
 #[pymethods]
@@ -685,6 +705,9 @@ impl BatchSimulator {
             crossover_k0,
             k0_manual_multiplier: 0.0,
             k_resets: 0,
+            gillespie_block_by_reactions: false,
+            gillespie_reactions_executed: 0,
+            gillespie_reactions_targeted: 0,
             // gillespie_threshold,
             // coll_table,
             // coll_table_r_values,
@@ -1868,14 +1891,27 @@ impl BatchSimulator {
         let gillespie = self.gillespie.as_mut().unwrap();
         gillespie.set_time(self.continuous_time);
 
-        let ave_time_per_rxn = 1.0 / total_propensity;
         // For now, we're going to assume that we will need to do, say,
         // at least O(sqrt n) reactions until it's worth turning on batching again.
         let num_rxns_to_execute = self.n.sqrt();
-        let time_to_run_gillespie = ave_time_per_rxn * num_rxns_to_execute as f64;
-        let time_to_run_gillespie_until = (self.continuous_time + time_to_run_gillespie).min(t_max);
-        gillespie.advance_until(time_to_run_gillespie_until);
+        let block_by_reactions = self.gillespie_block_by_reactions;
+        let executed = if block_by_reactions {
+            // Budget the block in reactions directly. rebop stops at whichever comes first, the
+            // reaction count or t_max, and the t_max test still happens between sampling a
+            // reaction time and applying the reaction, so exactness at t_max is unchanged.
+            gillespie.advance_until_or_reactions(t_max, Some(num_rxns_to_execute))
+        } else {
+            // Historical path: turn the target count into a duration using the propensity measured
+            // on entry. This is exact only if the propensity is constant over the block.
+            let ave_time_per_rxn = 1.0 / total_propensity;
+            let time_to_run_gillespie = ave_time_per_rxn * num_rxns_to_execute as f64;
+            let time_to_run_gillespie_until =
+                (self.continuous_time + time_to_run_gillespie).min(t_max);
+            gillespie.advance_until_or_reactions(time_to_run_gillespie_until, None)
+        };
         self.continuous_time = gillespie.get_time();
+        self.gillespie_reactions_executed += executed;
+        self.gillespie_reactions_targeted += num_rxns_to_execute;
 
         // Sync the counts rebop just changed back into self.urn. Without this, the propensity
         // calculated at the top of this function (and by active_reaction_probability in the
