@@ -186,3 +186,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 src/main.rs
+
+# Local benchmark experiment outputs
+benchmark/results/
