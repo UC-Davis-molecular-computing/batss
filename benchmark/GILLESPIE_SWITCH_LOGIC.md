@@ -1082,6 +1082,49 @@ Design notes:
   `threshold_cost_model.py`. This is checked only by length, which is the weakest part of the
   design; a reordering on the Python side would silently produce wrong thresholds.
 
+### Head-to-head with the real selector (2026-08-02)
+
+The first comparison in which the cost model runs as it would ship: `HEURISTIC_COST_MODEL`
+recomputing the threshold from the live configuration at every decision, rather than a threshold
+fixed for the whole run. The measured quantity is wall-clock seconds for one `BatchSimulator.run`
+call to reach `t_max`, construction excluded. 43 scenarios, 6 policies, seeds 901-904, two repeats.
+
+| policy | equal-family | family-worst | worst scenario | vs best tested | worst regret |
+|---|---:|---:|---:|---:|---:|
+| `timing` | 1.000x | 1.000x | 1.000x | 1.180x | **3.065x** |
+| `constant_250` | **0.885x** | 1.001x | 1.201x | **1.044x** | 1.211x |
+| `constant_500` | 0.931x | 1.133x | 1.755x | 1.098x | 1.771x |
+| **`cost_model_cold` x0.368** | 0.888x | **0.996x** | **1.061x** | 1.048x | **1.177x** |
+| **`cost_model_warm` x1.0** | 0.891x | 1.023x | 1.206x | 1.051x | 1.247x |
+| `cost_model_warm` x0.56 | 0.898x | 1.018x | 1.070x | 1.060x | 1.202x |
+
+Four conclusions, in decreasing order of how much the data supports them:
+
+1. **Every deterministic policy beats the adaptive timing policy**, by about 10% centrally. Timing
+   is 1.180x off the best-tested envelope and has by far the worst tail, 3.065x on its worst
+   scenario. It bootstraps from the old proxy, probes rarely, and needs a 4x measured advantage
+   before overriding, so on a short run it spends much of the trajectory still learning. **Timing is
+   not the target to beat; it was passed some time ago.**
+2. **`T = 500` is clearly worse than `T = 250`** on every metric, so the earlier pilot's selection
+   of 500 does not survive a wider scenario matrix.
+3. **The cost model's advantage is the tail, not the average.** Centrally, `constant_250` (0.885)
+   and the three cost-model variants (0.888-0.898) are within about 1.5% of each other, which is
+   well inside the noise floor and should not be read as an ordering. What separates them is the
+   worst case: `cost_model_cold` is the only policy whose family-worst is below 1.0 (0.996) and its
+   worst scenario is 1.061x against 1.201x for `constant_250`. That is the same pattern the
+   frozen-state work found, and the expected one: a constant must be wrong somewhere once the true
+   break-even spans 15x, while a structural model need not be.
+4. **A warm-fitted model with no correction at all is competitive.** `cost_model_warm` at scale 1.0
+   scores 0.891 centrally against 0.888 for the cold model with its fitted 0.368 -- indistinguishable
+   -- at the cost of a worse tail (1.206x versus 1.061x). This matters for portability: a model that
+   needs no empirical constant can move to a new machine with a recalibration of coefficients alone.
+
+Note also that applying the residual 0.56 to the *warm* model does not help centrally (0.898 versus
+0.891 unscaled), which argues the residual is not a real further correction so much as the breadth
+of the plateau. The earlier finding stands: the optimum is a wide region, the runner-up is within 5%
+in about half of scenarios, and differences of a few percent between policies inside that region are
+not meaningful.
+
 ### Honest limitations
 
 - **Held-out slopes are shallow where a family is the sole source of a feature.** Holding out

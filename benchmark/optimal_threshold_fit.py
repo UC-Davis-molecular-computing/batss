@@ -90,11 +90,16 @@ def main(argv: Sequence[str] | None = None) -> None:
                         help="classes within this fraction of the fastest count as tied, since the "
                              "measured timing floor is comparable to the gaps between them")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--training-timings", type=Path, action="append",
+                        help="timing CSVs the cost model is fit on (default: the cold _allg pair). "
+                             "Pass the warm pair to measure how much correction a warm-fitted model "
+                             "still needs, which is the direct test of whether cold measurement "
+                             "accounts for the scale factor")
     args = parser.parse_args(argv)
     seeds = [int(p) for p in args.seeds.split(",") if p.strip()]
 
-    training = [HERE / "batch_cost_profile_timings_allg.csv",
-                HERE / "batch_cost_profile_timings_allg_seed2.csv"]
+    training = args.training_timings or [HERE / "batch_cost_profile_timings_allg.csv",
+                                         HERE / "batch_cost_profile_timings_allg_seed2.csv"]
     rows_train = tcm.usable(tcm.load_rows(training))
     batch_fit = tcm.fit_cost(rows_train, "batch", horizon=5000.0)
     gillespie_fit = tcm.fit_cost(rows_train, "gillespie", horizon=5000.0)
