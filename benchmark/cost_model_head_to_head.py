@@ -44,7 +44,7 @@ import numpy as np
 
 import threshold_cost_model as tcm
 from policy_matrix_experiment import build_scenarios
-from switching_policy_comparison import Scenario, _make_sim
+from switching_policy_comparison import Scenario, _make_sim, comparison_scenarios
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_OUTPUT = HERE / "cost_model_head_to_head.csv"
@@ -111,6 +111,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--residual-scale", type=float, default=0.56,
                         help="correction still applied to the warm model, if the warm measurement "
                              "only accounts for part of the empirical scale factor")
+    parser.add_argument("--include-natural", action="store_true",
+                        help="also race the CRNs at their natural populations. Boundary "
+                             "placement drops every order-3 CRN, so this is the only way "
+                             "to get end-to-end o=3 coverage, though those runs do not sit "
+                             "near their own break-even")
+    parser.add_argument("--skip-slow", action="store_true",
+                        help="drop scenarios that hit the time cap; they contribute nothing "
+                             "to the analysis but cost cap-seconds on every run")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
     seeds = [int(p) for p in args.seeds.split(",") if p.strip()]
@@ -134,8 +142,29 @@ def main(argv: Sequence[str] | None = None) -> None:
     ]
 
     scenarios, _ = build_scenarios(probe_repeats=args.probe_repeats, seed=seeds[0])
-    print(f"{len(scenarios)} scenarios x {len(contenders)} policies x {len(seeds)} seeds "
-          f"x {args.repeats} repeats\n")
+    if args.include_natural:
+        # Boundary placement drops every order-3 CRN: Brusselator cannot reach its break-even below
+        # the population cap, and the collision o=3 family times out there. Their *natural*
+        # scenarios still run fine, so including them buys end-to-end order-3 coverage, at the cost
+        # of those runs not sitting near their own boundary.
+        placed = {s.case.spec.name for s in scenarios}
+        scenarios = scenarios + [s for s in comparison_scenarios()
+                                 if s.case.spec.name not in placed]
+    if args.skip_slow:
+        # A scenario that hits the cap under any policy contributes nothing to the analysis but
+        # costs cap-seconds on every one of its runs. Drop it once rather than repeatedly.
+        kept = []
+        for scenario in scenarios:
+            probe = run_once(scenario, contenders[0], seeds[0], args.cap_seconds)
+            if probe["timed_out"]:
+                print(f"  dropping {scenario.slug}: exceeds the {args.cap_seconds:g}s cap")
+            else:
+                kept.append(scenario)
+        scenarios = kept
+    print(f"\n{len(scenarios)} scenarios x {len(contenders)} policies x {len(seeds)} seeds "
+          f"x {args.repeats} repeats")
+    orders = sorted({int(_make_sim(s, seeds[0]).simulator.debug_o()) for s in scenarios})
+    print(f"reaction orders covered: {orders}\n")
 
     rows: list[dict[str, Any]] = []
     for repeat in range(args.repeats):

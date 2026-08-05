@@ -1125,6 +1125,62 @@ of the plateau. The earlier finding stands: the optimum is a wide region, the ru
 in about half of scenarios, and differences of a few percent between policies inside that region are
 not meaningful.
 
+### Held-out replication, and the one CRN where adaptive timing still wins (2026-08-02)
+
+The head-to-head above was repeated on fresh seeds 921-925, with two changes: scenarios that hit the
+time cap are screened out once instead of burning cap-seconds on every run, and the CRNs are also
+raced at their **natural** populations. That second change matters because boundary placement drops
+every order-3 CRN -- Brusselator cannot reach its break-even below the population cap and the
+collision `o = 3` family times out there -- so the natural runs are the only end-to-end order-3
+coverage available, at the cost of not sitting near their own boundary.
+
+Read as a single aggregate the result looks like a failure to replicate: `cost_model_cold`'s worst
+case goes from 1.061x to 1.253x and it no longer beats `constant_250`. Split by scenario type, the
+picture is the opposite.
+
+| subset | `constant_250` | `cost_model_cold` | `cost_model_warm` | `constant_500` |
+|---|---|---|---|---|
+| boundary-placed, n=40 (geo / worst) | 0.851 / 1.221 | 0.858 / **1.052** | 0.856 / 1.162 | 0.912 / 1.777 |
+| `dense_support` only, n=7 (geo / worst) | 1.006 / 1.221 | **0.949 / 1.052** | 1.045 / 1.162 | 1.169 / 1.777 |
+| natural populations, n=2 (geo) | 1.089 | 1.113 | 1.093 | 1.042 |
+| all 42 (geo / worst) | 0.861 / 1.229 | 0.868 / 1.253 | 0.866 / 1.279 | 0.917 / 1.777 |
+
+1. **The tail advantage replicates on the comparable subset.** On boundary-placed scenarios
+   `cost_model_cold`'s worst case is 1.052x against `constant_250`'s 1.221x, closely matching the
+   first run's 1.061x against 1.201x.
+2. **It is concentrated exactly where predicted.** On `dense_support` -- the only family varying `q`,
+   and the one whose break-even sits furthest from typical -- the cost model wins both centrally
+   (0.949 vs 1.006) and on the tail (1.052 vs 1.221). That is the structural advantage doing the
+   thing it was built to do.
+3. **The aggregate moved because of two added scenarios, not because the effect vanished.** All
+   deterministic policies lose to timing at natural populations, and the worst single scenario for
+   every one of them is `oregonator_n1e5`.
+
+#### Oregonator: where deterministic switching still loses
+
+| policy | ratio to timing on `oregonator_n1e5` |
+|---|---:|
+| timing | 1.000x |
+| `constant_500` | 1.204x |
+| `constant_250` | 1.229x |
+| `cost_model_cold` | 1.253x |
+| `cost_model_warm` | 1.279x |
+
+Adaptive wall-clock measurement beats **every** deterministic policy by 20-28% on the stiff
+oscillator -- which is precisely the CRN the wall-clock rule was introduced to fix, where the proxy
+rule had been 30-90x too slow. A threshold on the prospective score, however well calibrated, cannot
+see what the wall-clock EMAs see there.
+
+This is the strongest argument for a hybrid rather than a replacement: use the cost-model threshold
+as the decision rule and the prior, and retain the measured-throughput override for the cases where
+the model is wrong about a specific machine or a specific regime. The current wall-clock policy
+already has that structure; what it lacks is a good prior, which is what the cost model supplies.
+
+> [!NOTE]
+> Deterministic policies beat timing by about 15% on boundary-placed scenarios (0.851-0.858) and
+> lose by about 10% on natural ones. Which number is "the" answer depends entirely on the scenario
+> mix, and neither mix is a random sample of real use. Quote the split, not the aggregate.
+
 ### Honest limitations
 
 - **Held-out slopes are shallow where a family is the sole source of a feature.** Holding out
