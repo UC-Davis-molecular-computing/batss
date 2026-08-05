@@ -945,6 +945,143 @@ whose structures differ sharply -- the `dense_support`-style high-`q` and order-
 trajectories rather than frozen states. Until then, `T = 500` is the defensible practical choice and
 the cost model is the better-understood one.
 
+### Where the scale factor comes from (2026-08-02)
+
+The separate-cost model predicts `T*` well but has to be multiplied by a fitted constant well below
+1 before it wins end to end. That constant had no established mechanism. Four were proposed and
+tested; three are refuted and one is confirmed but only partially sufficient. Recording all four,
+because the refutations are as useful as the confirmation.
+
+#### The constant is a constant, not a missing term
+
+`optimal_threshold_fit.py` measures the end-to-end optimum directly rather than fitting to `T*`.
+For each scenario it sweeps multipliers of that scenario's own `T_hat`, groups them into
+equivalence classes by mode signature (thresholds that never straddle an encountered score execute
+the identical run, so timing differences between them are noise), times one representative per
+class, and treats every class within 5% of the fastest as tied. The optimum is therefore a plateau,
+and `alpha = T_opt / T_hat` is the geometric centre of the winning plateau.
+
+| | |
+|---|---|
+| `alpha` | **0.368**, 95% CI **[0.304, 0.445]** -- so the shipped 0.5 was too high |
+| free slope of `log T_opt` on `log T_hat` | 1.209 +/- 0.310, **t = +0.68 versus slope 1** |
+| does a free slope fit better? | no -- residual sd 0.4866 free versus **0.4805** with `alpha` forced constant |
+| structural correlates of `log alpha` | all weak: `g` +0.29, `q` -0.12, `B` -0.10, `log2 N` -0.12 |
+| family means | branch_count [0.29, 0.47], dense_support [0.24, 0.46], shrinking [0.21, 0.61] -- overlapping |
+
+A single constant is statistically adequate and no missing structural term is detectable. The
+apparent 5.9x spread in `alpha` is not structure: per-scenario optima are poorly determined, with
+the runner-up within 5% in 11 of 23 scenarios, so the argmin flips between distant multipliers on
+noise. Observed sd of `log alpha` is 0.481 against 0.097 explainable by grid spacing.
+
+> [!NOTE]
+> This 0.368 is the mean of per-scenario optima, weighting every scenario equally. The earlier
+> held-out sweep found 0.5-0.6 best because it optimised a different thing -- a single global
+> multiplier against the equal-family aggregate, which is dominated by scenarios where being wrong
+> is expensive. For choosing a shipped constant the second is the relevant objective. The two
+> numbers are not in conflict; they answer different questions.
+
+Caveats: 23 of 38 scenarios survived, and **every survivor has `o = 2`**, so this says nothing about
+reaction-order dependence.
+
+#### Refuted: the training data was sampled from the wrong states
+
+`profile_batch_costs.py` times every case from its CRN's **initial** configuration, but a running
+policy spends its whole life at intermediate states. Fitting on the wrong state distribution would
+bias the costs, and `alpha` would be absorbing that bias. `threshold_model.py` already samples the
+right distribution -- `capture_frozen_states` walks a trajectory and freezes states along it -- so
+the fit was repeated there (`--trajectory-states`).
+
+| fit -> tested on | bias (geo-mean `T_hat`/`T*`) | median rel. err | corr |
+|---|---:|---:|---:|
+| initial -> initial (in sample) | 0.998 | 0.036 | 0.986 |
+| **initial -> trajectory** | **1.092** | 0.155 | 0.736 |
+| trajectory -> trajectory (in sample) | 1.035 | 0.109 | 0.820 |
+
+The initial-configuration model over-predicts `T*` at trajectory states by only 9%, implying
+`alpha ~ 0.92`; explaining 0.368 would need a bias near 2.7x. Per-CRN biases scatter 0.88-1.35 with
+no systematic direction. **Refuted.** Two by-products: the model handles Brusselator's order-3
+trajectory states with bias 0.920, partly closing the `o = 3` gap; and a trajectory-only *fit* gives
+wildly unstable coefficients, because 96 states across only 6 CRNs give the structural features just
+six distinct values.
+
+#### Refuted: switching overhead, and Gillespie block coarseness
+
+Both were tested earlier and are recorded above: switch overhead is 0.018% of run time under the
+timing policy and 0.003% under a fixed threshold, three orders of magnitude too small; and budgeting
+Gillespie blocks by reaction count rather than duration changed wall-clock by 0.2% even though it
+corrected a genuine 2x block-sizing error.
+
+#### Confirmed: the fitted costs were measured cold, and a real run is warm
+
+`_benchmark_once` builds a **fresh simulator for every timed call**, so every fitted cost is a
+*first* engine call on cold data structures -- cold caches, untrained branch predictor, first-touch
+page faults on the urn and transition arrays. A real run executes thousands of warm calls. This is
+not symmetric between engines: batch touches the transition arrays, the urn and all `q^o` terminal
+lanes, while Gillespie touches a small dense rate vector.
+
+`profile_batch_costs.py --warm` keeps one simulator alive per case and restores its configuration
+with `reset` before each timed call, so memory stays warm as in a real run while the state is held
+fixed -- separating warmth from trajectory drift. Across all 37 cases, 301 repeats, two seeds:
+
+| | geometric mean warm/cold |
+|---|---:|
+| batch cost | **0.617** |
+| Gillespie cost | **0.942** |
+| `T*` | **0.656** (range 0.526 .. 1.067) |
+
+The asymmetry is exactly as predicted, and consistent across every case. Refitting on warm costs
+gives the strongest single piece of evidence that this is a real mechanism rather than a
+coincidence: in the cold fit `const` was the **largest** coefficient (4.267) and simultaneously the
+**least identifiable** (nonzero in only 73% of bootstrap resamples, confidence interval spanning
+zero). Fit on warm costs it drops to **exactly zero**. A fixed per-call overhead that vanishes once
+you stop measuring first calls is what a cold-start artifact looks like.
+
+**But it is not sufficient.** 0.656 accounts for about 42% of the log-gap to 0.368, leaving a
+residual near 0.56 still unexplained. Warm measurement is a large, real contributor; something else
+remains.
+
+#### Reading the coefficients
+
+A coefficient's magnitude alone means nothing here, because the features differ in scale by orders
+of magnitude. `active_reactions` has the smallest cold coefficient (0.0023) and the largest feature
+range (1.18 to 3590), contributing up to **26%** of `C_batch`; a 400-sample bootstrap finds it
+nonzero in **98%** of resamples. The intercept, with the largest coefficient, is nonzero in only
+73%. Judge terms by contribution share and bootstrap stability, not by coefficient size.
+
+### The cost model as a real selector: `HEURISTIC_COST_MODEL` (2026-08-02)
+
+Every comparison before this one fed the simulator a *fixed* threshold computed once in Python from
+the initial state. Selector 3 recomputes the threshold from the live configuration at every
+decision, which is the production form:
+
+```rust
+let threshold = if self.switch.heuristic == HEURISTIC_COST_MODEL {
+    self.cost_model_threshold(score)      // state-dependent, per iteration
+} else {
+    self.switch.proxy_threshold
+};
+self.set_mode(score < threshold);
+```
+
+`cost_model_threshold` is allocation-free and costs one `log2` plus a handful of multiplies, which
+is negligible beside the `calculate_total_propensity` already running every iteration. It was
+verified against the Python fit on all 37 profile cases and agrees to **3.2e-16**; a silent
+divergence between the fitted model and its implementation would have invalidated every comparison
+built on it.
+
+Design notes:
+
+- **Coefficients are settable from Python, not compiled in.** They are machine- and build-specific:
+  the functional form transfers between CPUs, the numbers do not. This also allows a refit to be
+  tested without a rebuild.
+- **`cost_model_scale` defaults to 1.0**, so a model fitted on warm costs needs no correction.
+- With no coefficients supplied the selector falls back to `proxy_threshold`, degrading to a fixed
+  threshold rather than to nonsense.
+- The feature order must match `BATCH_FEATURES` / `GILLESPIE_FEATURES` in
+  `threshold_cost_model.py`. This is checked only by length, which is the weakest part of the
+  design; a reordering on the Python side would silently produce wrong thresholds.
+
 ### Honest limitations
 
 - **Held-out slopes are shallow where a family is the sole source of a feature.** Holding out
@@ -1007,6 +1144,17 @@ the cost model is the better-understood one.
   `batch_cost_profile_*.csv` files contain both seed passes and their summaries. Pass
   `--measure-gillespie-all` to time Gillespie for every case, not just the two paired Shrinking
   families; the `batch_cost_profile_timings_allg*.csv` files were collected that way.
+- **Optimal-threshold harness:** `benchmark/optimal_threshold_fit.py`; measures the end-to-end
+  optimal threshold per scenario by sweeping multipliers of that scenario's own `T_hat`, grouping
+  them into mode-signature equivalence classes, and treating classes within a tolerance of the
+  fastest as tied. Reports `alpha = T_opt / T_hat` and whether it tracks any structural feature.
+- **Warm/cold probe:** `benchmark/warm_vs_cold_engine_cost.py`; compares one-call-per-fresh-simulator
+  against repeated calls on a live simulator, to show how much of the fitted cost is cold-start.
+  Note its warm series advances the trajectory, so small-`n` cases are drift-contaminated; the
+  controlled version is `profile_batch_costs.py --warm`, which resets the configuration each call.
+- **Head-to-head harness:** `benchmark/cost_model_head_to_head.py`; races `HEURISTIC_COST_MODEL`
+  with cold and warm coefficient sets against the timing policy and fixed thresholds, measuring the
+  quantity that actually matters -- wall-clock seconds for one `run` call to reach `t_max`.
 - **Separate-cost model harness:** `benchmark/threshold_cost_model.py`; fits `C_batch` and
   `C_Gillespie` independently with nonnegative least squares, forms `T_hat` as their ratio, and
   reports leave-one-family-out threshold accuracy plus the constant and `T_logN` baselines. Note it

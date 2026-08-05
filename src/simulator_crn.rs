@@ -284,6 +284,18 @@ impl UniformCRN {
 pub const HEURISTIC_WALLCLOCK: u8 = 0;
 pub const HEURISTIC_PROXY: u8 = 1;
 pub const HEURISTIC_PROSPECTIVE: u8 = 2;
+/// Like `HEURISTIC_PROSPECTIVE`, but the threshold is recomputed from a fitted cost model at every
+/// decision instead of being a fixed number. See `cost_model_threshold`.
+pub const HEURISTIC_COST_MODEL: u8 = 3;
+
+/// Feature order for `cost_model_batch_coefficients`. Must match `BATCH_FEATURES` in
+/// `benchmark/threshold_cost_model.py`, which is where the coefficients are fitted.
+pub const COST_MODEL_BATCH_FEATURES: usize = 13;
+/// Feature order for `cost_model_gillespie_coefficients`; matches `GILLESPIE_FEATURES` there.
+pub const COST_MODEL_GILLESPIE_FEATURES: usize = 6;
+/// Gillespie reactions the fitted sync term is amortized over. Matches the `horizon` the Python fit
+/// uses, so a coefficient vector transfers without rescaling.
+const COST_MODEL_SYNC_HORIZON: f64 = 5000.0;
 
 /// All state for the batch/Gillespie mode-switching heuristic, grouped into one struct so the
 /// simulator doesn't carry a dozen more top-level fields. Holds the heuristic selector and its
@@ -581,6 +593,22 @@ pub struct BatchSimulator {
     pub gillespie_reactions_executed: u64,
     #[pyo3(get)]
     pub gillespie_reactions_targeted: u64,
+
+    /// Fitted cost-model coefficients used by `HEURISTIC_COST_MODEL`, in the feature order defined
+    /// by `benchmark/threshold_cost_model.py`. They are settable rather than compiled in because
+    /// they are machine- and build-specific: the *form* of the model transfers between CPUs, the
+    /// numbers do not. Leaving them empty makes the selector fall back to `proxy_threshold`.
+    #[pyo3(get, set)]
+    pub cost_model_batch_coefficients: Vec<f64>,
+    #[pyo3(get, set)]
+    pub cost_model_gillespie_coefficients: Vec<f64>,
+
+    /// Multiplier applied to the predicted ratio. The fitted costs are measured one call at a time
+    /// on a freshly built simulator, which is colder than the steady state a real run executes in;
+    /// batch pays much more for that than Gillespie does, so an uncorrected prediction runs high.
+    /// Defaults to 1.0, i.e. no correction, so a model fitted on warm costs needs nothing here.
+    #[pyo3(get, set)]
+    pub cost_model_scale: f64,
 }
 
 #[pymethods]
@@ -708,6 +736,9 @@ impl BatchSimulator {
             gillespie_block_by_reactions: false,
             gillespie_reactions_executed: 0,
             gillespie_reactions_targeted: 0,
+            cost_model_batch_coefficients: Vec::new(),
+            cost_model_gillespie_coefficients: Vec::new(),
+            cost_model_scale: 1.0,
             // gillespie_threshold,
             // coll_table,
             // coll_table_r_values,
@@ -937,13 +968,22 @@ impl BatchSimulator {
             // HEURISTIC_PROSPECTIVE is deterministic and evaluates the batch at k_reset_target().
             // !(p > 0.0) rather than p == 0.0 so that a NaN from any future degenerate
             // propensity ratio is also treated as silent instead of bypassing the check.
-            if self.switch.heuristic == HEURISTIC_PROSPECTIVE {
+            if self.switch.heuristic == HEURISTIC_PROSPECTIVE
+                || self.switch.heuristic == HEURISTIC_COST_MODEL
+            {
                 let real_propensity = self.calculate_total_propensity(false);
                 if !(real_propensity > 0.0) {
                     self.silent = true;
                 }
                 let score = self.prospective_batch_score_from_real_propensity(real_propensity);
-                self.set_mode(score < self.switch.proxy_threshold);
+                // The two selectors differ only in where the threshold comes from: a fixed number,
+                // or one predicted from the current state by the fitted cost model.
+                let threshold = if self.switch.heuristic == HEURISTIC_COST_MODEL {
+                    self.cost_model_threshold(score)
+                } else {
+                    self.switch.proxy_threshold
+                };
+                self.set_mode(score < threshold);
                 continue;
             }
             let active_probability = self.active_reaction_probability();
@@ -1298,6 +1338,14 @@ impl BatchSimulator {
             .map(|reaction| reaction.products_and_rate_constants.len())
             .sum()
     }
+
+    /// The threshold `HEURISTIC_COST_MODEL` would use at the current configuration. Exposed so the
+    /// Rust implementation can be checked against the Python fit it is supposed to reproduce; a
+    /// silent divergence between them would invalidate every comparison built on the model.
+    pub fn debug_cost_model_threshold(&self) -> f64 {
+        let score = self.prospective_batch_score();
+        self.cost_model_threshold(score)
+    }
 }
 
 // --- Wall-clock-aware batch/Gillespie switching ---------------------------------
@@ -1536,6 +1584,96 @@ impl BatchSimulator {
         let expected_batch_length =
             (std::f64::consts::PI / collision_denominator).sqrt() * (prospective_n as f64).sqrt();
         (real_propensity / total_propensity) * expected_batch_length
+    }
+
+    /// Predicted break-even score for `HEURISTIC_COST_MODEL`: the cost of one batch call divided by
+    /// the cost of one exact Gillespie reaction, so it reads as "how many Gillespie reactions this
+    /// batch is worth buying instead of". Batching pays off exactly when the prospective score
+    /// exceeds it.
+    ///
+    /// The two costs are modelled separately and divided only at the end. Fitting the ratio
+    /// directly does not work: it is a quotient, and regressing it as a sum gives unstable
+    /// coefficients whose signs flip between datasets. Each cost here is a sum of operation counts
+    /// with nonnegative coefficients, because every term is an amount of real work.
+    ///
+    /// Allocation-free and called once per iteration, which is negligible beside the
+    /// `calculate_total_propensity` that already runs there. Returns `proxy_threshold` unchanged if
+    /// no coefficients have been supplied, so the selector degrades to a fixed threshold rather
+    /// than to nonsense.
+    fn cost_model_threshold(&self, score: f64) -> f64 {
+        if self.cost_model_batch_coefficients.len() != COST_MODEL_BATCH_FEATURES
+            || self.cost_model_gillespie_coefficients.len() != COST_MODEL_GILLESPIE_FEATURES
+        {
+            return self.switch.proxy_threshold;
+        }
+
+        let q = self.q as f64;
+        let o = self.crn.o as f64;
+        let g = self.crn.g as f64;
+        // Total directed reaction channels, the same quantity `debug_output_branches` reports and
+        // the `B` the coefficients were fitted against.
+        let branches = self
+            .crn
+            .reactions
+            .iter()
+            .map(|reaction| reaction.products_and_rate_constants.len())
+            .sum::<usize>() as f64;
+        // K is frozen during Gillespie, so evaluate at the K the next batch would actually be
+        // prepared with, matching what the score itself assumes.
+        let prospective_n = self.n.saturating_add(self.k_reset_target()) as f64;
+        let log2_n = if prospective_n > 0.0 { prospective_n.log2() } else { 0.0 };
+
+        // Dense recursive sampling visits 1 + q + ... + q^(o-1) nodes doing ~q work each, so the
+        // node work is sum_{d=1..o} q^d; the terminal scan over q^o lanes is a separate term.
+        let mut recursive_nodes = 0.0;
+        let mut lanes = 1.0;
+        for _ in 0..self.crn.o {
+            lanes *= q;
+            recursive_nodes += lanes;
+        }
+        let expected_batch_length = {
+            let denominator = 2.0 * o * (o + g);
+            if denominator > 0.0 {
+                (std::f64::consts::PI / denominator).sqrt() * prospective_n.sqrt()
+            } else {
+                0.0
+            }
+        };
+        // A batch cannot occupy more lanes than it has draws, so occupancy saturates.
+        let occupied_lanes = if lanes > 0.0 {
+            lanes * (1.0 - (-expected_batch_length / lanes).exp())
+        } else {
+            0.0
+        };
+        let real_species = (q - 2.0).max(0.0);
+
+        let b = &self.cost_model_batch_coefficients;
+        let batch = b[0]
+            + b[1] * log2_n
+            + b[2] * o
+            + b[3] * (o * log2_n)
+            + b[4] * if self.crn.g >= 1 { 1.0 } else { 0.0 }
+            + b[5] * g
+            + b[6] * (g * log2_n)
+            + b[7] * recursive_nodes
+            + b[8] * lanes
+            + b[9] * occupied_lanes
+            + b[10] * score.max(0.0)
+            + b[11] * branches
+            + b[12] * q;
+
+        let c = &self.cost_model_gillespie_coefficients;
+        let gillespie = c[0]
+            + c[1] * branches
+            + c[2] * (branches * real_species)
+            + c[3] * (branches * o)
+            + c[4] * real_species
+            + c[5] * (q / COST_MODEL_SYNC_HORIZON);
+
+        if !(gillespie > 0.0) || !batch.is_finite() {
+            return self.switch.proxy_threshold;
+        }
+        self.cost_model_scale * batch / gillespie
     }
 
     /// Choose the engine for the next iteration (`true` = Gillespie), maintaining the

@@ -186,6 +186,49 @@ def load_rows(paths: Sequence[Path]) -> list[dict[str, str]]:
     return merged
 
 
+def load_trajectory_states(paths: Sequence[Path]) -> list[dict[str, str]]:
+    """Adapt `threshold_model.py`'s frozen-state CSVs into the row schema used here.
+
+    This exists because of a sampling gap. `profile_batch_costs.py`, which produced the training
+    data for the original fit, times every case from its CRN's **initial** configuration. A running
+    policy never sees those states after step one -- it spends the whole trajectory at intermediate
+    configurations whose composition, active fraction, and K have all drifted. `threshold_model.py`
+    samples exactly those: `capture_frozen_states` walks a real trajectory and freezes states along
+    it, then times both engines there with the same `benchmark_engine_call` oracle.
+
+    Fitting the cost model on this distribution instead tests whether the empirical `alpha` needed
+    to make the model win end-to-end is a real physical constant or an artifact of having trained on
+    initial configurations only.
+
+    Column names and units differ (seconds rather than microseconds), so they are translated here
+    rather than by changing either harness.
+    """
+
+    rows: list[dict[str, str]] = []
+    for path in paths:
+        with path.open(newline="", encoding="utf-8") as handle:
+            for row in csv.DictReader(handle):
+                if not row.get("threshold_T_star"):
+                    continue
+                rows.append({
+                    # One fit row per frozen state; family is the CRN, so leave-one-family-out and
+                    # the per-family reporting still group the way they do for the profile matrix.
+                    "case": f"{row['crn']}_s{row.get('state_id', '?')}",
+                    "family": row["crn"],
+                    "trajectory_time": row.get("trajectory_time", ""),
+                    "prospective_N": row["prospective_n"],
+                    "q": row["q"], "o": row["o"], "g": row["g"],
+                    "score": row["score"],
+                    "expected_batch_length": row["expected_batch_length"],
+                    "output_branches_B": row["output_branches_B"],
+                    "batch_steady_us_per_call": str(float(row["batch_steady_seconds"]) * 1e6),
+                    "gillespie_steady_us_per_reaction":
+                        str(float(row["gillespie_seconds_per_reaction"]) * 1e6),
+                    "threshold_T_star": row["threshold_T_star"],
+                })
+    return rows
+
+
 def usable(rows: Sequence[dict[str, str]]) -> list[dict[str, str]]:
     keep = []
     for row in rows:
@@ -398,12 +441,27 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--evaluate-timings", type=Path, action="append",
                         help="held-out paired timing CSV(s) used only for evaluation, never for "
                              "fitting; intended for the near-boundary decision test set")
+    parser.add_argument("--trajectory-states", type=Path, action="append",
+                        help="fit on states sampled ALONG a trajectory instead of initial "
+                             "configurations: pass threshold_model.py's *_states.csv. These are "
+                             "the states a running policy actually meets, so a fit here tests "
+                             "whether the empirical scale factor is physical or a sampling artifact")
+    parser.add_argument("--evaluate-trajectory-states", type=Path, action="append",
+                        help="held-out trajectory-state CSV(s), same format as --trajectory-states")
     parser.add_argument("--horizon", type=float, default=5000.0,
                         help="Gillespie reactions the sync cost is amortized over (the block size)")
     parser.add_argument("--json-out", type=Path)
     args = parser.parse_args(argv)
 
-    rows = usable(load_rows(args.timings))
+    rows = usable(load_rows(args.timings)) if args.timings else []
+    if args.trajectory_states:
+        trajectory = usable(load_trajectory_states(args.trajectory_states))
+        print(f"trajectory-sampled states: {len(trajectory)} "
+              f"across {len(set(r['family'] for r in trajectory))} CRNs "
+              f"(states met during a run, not initial configurations)")
+        rows = rows + trajectory
+    if not rows:
+        raise SystemExit("give at least one of --timings or --trajectory-states")
     print(f"usable paired states: {len(rows)} "
           f"across {len(set(row['family'] for row in rows))} families\n")
 
@@ -468,11 +526,15 @@ def main(argv: Sequence[str] | None = None) -> None:
                   f"T_hat={item['T_predicted']:>8.1f} regret={item['regret']:.3f}")
 
     heldout = None
+    test_rows: list[dict[str, str]] = []
     if args.evaluate_timings:
+        test_rows += usable(load_rows(args.evaluate_timings))
+    if args.evaluate_trajectory_states:
+        test_rows += usable(load_trajectory_states(args.evaluate_trajectory_states))
+    if test_rows:
         print("\n" + "=" * 78)
-        print("HELD-OUT DECISION TEST (near-boundary states; fit uses training rows only)")
+        print("HELD-OUT DECISION TEST (fit uses training rows only)")
         print("=" * 78)
-        test_rows = usable(load_rows(args.evaluate_timings))
         heldout = report_heldout(rows, test_rows, horizon=args.horizon)
 
     if args.json_out:

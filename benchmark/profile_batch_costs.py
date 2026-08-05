@@ -41,6 +41,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+import numpy as np
+
 from threshold_model import ExperimentCase, _make_sim, experiment_cases
 
 import batss as bt
@@ -384,9 +386,49 @@ def collect_components(
     return rows
 
 
-def _benchmark_once(profile_case: ProfileCase, *, seed: int, gillespie: bool, reactions: int) -> Any:
+# Live simulators kept between measured calls in warm mode, keyed by (case, engine) so the two
+# engines cannot perturb each other's state or random stream. Each entry is (simulation, config).
+_WARM_SIMULATORS: dict[tuple[str, bool], tuple[Any, Any]] = {}
+
+
+def reset_warm_simulators() -> None:
+    _WARM_SIMULATORS.clear()
+
+
+def _benchmark_once(profile_case: ProfileCase, *, seed: int, gillespie: bool, reactions: int,
+                    warm: bool = False) -> Any:
+    """Time one engine call.
+
+    The default builds a **fresh simulator per call**, so every measurement is the first engine call
+    on brand-new data structures. That understates neither engine equally: batch touches the
+    transition arrays, the urn, and all `q^o` terminal lanes, while Gillespie touches a small dense
+    rate vector, so batch pays far more for a cold start. Measured on this machine, batch is 1.4-4x
+    cheaper once warm while Gillespie barely moves, which inflates the fitted `C_batch/C_Gillespie`
+    ratio -- and a real run executes thousands of warm calls, not cold ones.
+
+    With ``warm=True`` the simulator is kept alive across calls and its configuration restored with
+    `reset` before each one. That separates the two effects: memory and branch predictors stay warm
+    as they are in a real run, while the state is identical every time, so the measurement is not
+    contaminated by the trajectory advancing.
+    """
+
     config = profile_case.case.spec.inits_from_n(profile_case.case.initial_n)
-    sim = _make_sim(profile_case.case, config, seed)
+    if not warm:
+        sim = _make_sim(profile_case.case, config, seed)
+        return sim.simulator.benchmark_engine_call(gillespie, reactions if gillespie else None)
+
+    key = (profile_case.case.slug, gillespie)
+    entry = _WARM_SIMULATORS.get(key)
+    if entry is None:
+        sim = _make_sim(profile_case.case, config, seed)
+        initial = np.asarray(sim.simulator.config, dtype="<u8").copy()
+        _WARM_SIMULATORS[key] = (sim, initial)
+    else:
+        sim, initial = entry
+        # Restore the configuration without discarding the warmed-up simulator. `reset` also
+        # returns it to batch mode and clears the switch measurements, which is what a freshly
+        # built simulator would look like.
+        sim.simulator.reset(initial, 0.0)
     return sim.simulator.benchmark_engine_call(gillespie, reactions if gillespie else None)
 
 
@@ -397,9 +439,13 @@ def collect_timings(
     seed: int,
     gillespie_reactions: int,
     output: Path,
+    warm: bool = False,
 ) -> list[dict[str, Any]]:
-    # Pay first-use costs before collecting samples. The warm-up uses a fresh simulator, just as
-    # every measured call does, and exercises both engines wherever T* will be calculated.
+    # Pay first-use costs before collecting samples. In cold mode the warm-up uses a fresh simulator
+    # just as every measured call does; in warm mode it also primes the persistent simulator whose
+    # caches and branch predictors the measured calls then reuse, so several priming calls are made.
+    reset_warm_simulators()
+    priming_calls = 5 if warm else 1
     metadata_rows: dict[str, dict[str, Any]] = {}
     batch_results_by_case: dict[str, list[Any]] = {}
     gillespie_results_by_case: dict[str, list[Any]] = {}
@@ -409,17 +455,20 @@ def collect_timings(
         probe = _make_sim(profile_case.case, config, _stable_seed(seed, slug, "metadata"))
         metadata_rows[slug] = _metadata(profile_case, probe)
         metadata_rows[slug]["profile_seed"] = seed
+        metadata_rows[slug]["measured_warm"] = warm
         batch_results_by_case[slug] = []
         gillespie_results_by_case[slug] = []
         warm_seed = _stable_seed(seed, slug, "warm")
-        _benchmark_once(profile_case, seed=warm_seed, gillespie=False, reactions=0)
-        if profile_case.measure_gillespie:
-            _benchmark_once(
-                profile_case,
-                seed=warm_seed,
-                gillespie=True,
-                reactions=gillespie_reactions,
-            )
+        for _ in range(priming_calls):
+            _benchmark_once(profile_case, seed=warm_seed, gillespie=False, reactions=0, warm=warm)
+            if profile_case.measure_gillespie:
+                _benchmark_once(
+                    profile_case,
+                    seed=warm_seed,
+                    gillespie=True,
+                    reactions=gillespie_reactions,
+                    warm=warm,
+                )
 
     # Sweep the complete case matrix once per repeat instead of exhausting one case at a time.
     # Rotating the starting case makes every CRN occupy different positions in the sweep, reducing
@@ -431,8 +480,10 @@ def collect_timings(
         for profile_case in repeat_cases:
             slug = profile_case.case.slug
             trial_seed = _stable_seed(seed, slug, repeat)
-            # Alternate paired execution order to reduce monotonic clock/thermal drift. Each call
-            # still receives a fresh simulator and the same seed.
+            # Alternate paired execution order to reduce monotonic clock/thermal drift. In cold mode
+            # each call also receives a fresh simulator and the same seed; in warm mode the
+            # persistent simulator is reused and its configuration reset, so the seed only sets the
+            # stream on first construction.
             if profile_case.measure_gillespie and repeat % 2:
                 gillespie_results_by_case[slug].append(
                     _benchmark_once(
@@ -440,14 +491,17 @@ def collect_timings(
                         seed=trial_seed,
                         gillespie=True,
                         reactions=gillespie_reactions,
+                        warm=warm,
                     )
                 )
                 batch_results_by_case[slug].append(
-                    _benchmark_once(profile_case, seed=trial_seed, gillespie=False, reactions=0)
+                    _benchmark_once(profile_case, seed=trial_seed, gillespie=False, reactions=0,
+                                    warm=warm)
                 )
             else:
                 batch_results_by_case[slug].append(
-                    _benchmark_once(profile_case, seed=trial_seed, gillespie=False, reactions=0)
+                    _benchmark_once(profile_case, seed=trial_seed, gillespie=False, reactions=0,
+                                    warm=warm)
                 )
                 if profile_case.measure_gillespie:
                     gillespie_results_by_case[slug].append(
@@ -456,6 +510,7 @@ def collect_timings(
                             seed=trial_seed,
                             gillespie=True,
                             reactions=gillespie_reactions,
+                            warm=warm,
                         )
                     )
         print(f"timing repeat {repeat + 1}/{repeats}", flush=True)
@@ -541,6 +596,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "off by default so the original paired-family CSVs stay reproducible."
         ),
     )
+    parser.add_argument(
+        "--warm",
+        action="store_true",
+        help=(
+            "keep one simulator alive per case and reset its configuration before each timed call, "
+            "instead of building a fresh simulator every time. A fresh simulator makes every "
+            "measurement a *first* engine call on cold data structures, which penalises batch far "
+            "more than Gillespie and so inflates the fitted C_batch/C_Gillespie ratio; a real run "
+            "executes warm calls. Off by default so the original CSVs stay reproducible."
+        ),
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     if args.repeats is None:
@@ -568,6 +634,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             seed=args.seed,
             gillespie_reactions=args.gillespie_reactions,
             output=args.output.resolve(),
+            warm=args.warm,
         )
 
 
