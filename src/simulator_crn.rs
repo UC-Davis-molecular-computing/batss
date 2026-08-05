@@ -1894,24 +1894,30 @@ impl BatchSimulator {
         // For now, we're going to assume that we will need to do, say,
         // at least O(sqrt n) reactions until it's worth turning on batching again.
         let num_rxns_to_execute = self.n.sqrt();
-        let block_by_reactions = self.gillespie_block_by_reactions;
-        let executed = if block_by_reactions {
-            // Budget the block in reactions directly. rebop stops at whichever comes first, the
-            // reaction count or t_max, and the t_max test still happens between sampling a
-            // reaction time and applying the reaction, so exactness at t_max is unchanged.
-            gillespie.advance_until_or_reactions(t_max, Some(num_rxns_to_execute))
+        let executed = if self.gillespie_block_by_reactions {
+            // Budget the block in reactions and bound it by `t_max` at the same time: rebop stops
+            // at whichever limit is exceeded first. The `t_max` test still happens between sampling
+            // a reaction time and applying the reaction, so the block cannot carry the run past the
+            // requested end time, and the reaction count needs no propensity assumption.
+            gillespie.reactions_until_time_or_reactions(Some(t_max), Some(num_rxns_to_execute))
         } else {
             // Historical path: turn the target count into a duration using the propensity measured
             // on entry. This is exact only if the propensity is constant over the block.
-            let ave_time_per_rxn = 1.0 / total_propensity;
-            let time_to_run_gillespie = ave_time_per_rxn * num_rxns_to_execute as f64;
-            let time_to_run_gillespie_until =
-                (self.continuous_time + time_to_run_gillespie).min(t_max);
-            gillespie.advance_until_or_reactions(time_to_run_gillespie_until, None)
+            let estimated_block_time = num_rxns_to_execute as f64 / total_propensity;
+            let until = (self.continuous_time + estimated_block_time).min(t_max);
+            gillespie.reactions_until_time_or_reactions(Some(until), None)
         };
         self.continuous_time = gillespie.get_time();
-        self.gillespie_reactions_executed += executed;
-        self.gillespie_reactions_targeted += num_rxns_to_execute;
+        match executed {
+            Some(fired) => {
+                self.gillespie_reactions_executed += fired;
+                self.gillespie_reactions_targeted += num_rxns_to_execute;
+            }
+            // Only a reaction-budgeted block can report this: nothing was left to react, so the
+            // budget was unreachable. There is no meaningful over/undershoot to record, and the
+            // caller needs to know the configuration is silent rather than retry the same block.
+            None => self.silent = true,
+        }
 
         // Sync the counts rebop just changed back into self.urn. Without this, the propensity
         // calculated at the top of this function (and by active_reaction_probability in the

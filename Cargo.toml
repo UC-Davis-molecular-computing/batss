@@ -42,18 +42,13 @@ lazy_static = "1"
 stybulate = "1"
 itertools = "0.14.0"
 compensated-summation = "0.3.1"
-rebop = { version = "0.9.7", default-features = false }
+# We depend on our own fork of rebop rather than the crates.io release, so that changes we need in
+# the Gillespie engine can be made directly instead of worked around here. The fork tracks upstream
+# main and currently adds `Gillespie::reactions_until_time_or_reactions`, which lets a Gillespie
+# block be budgeted by reaction count instead of by a duration inferred from the entry propensity.
+#
+# Pinned by `rev` rather than `branch` so a build is reproducible and a fork-side commit cannot
+# silently change what this crate compiles against. To take a new fork commit, update the rev.
+rebop = { git = "https://github.com/UC-Davis-molecular-computing/rebop", rev = "872e0ea74e078f2501cf17a84e640eccf449d2fe", default-features = false }
 serde_json = "1.0"
 tqdm = "0.8"
-
-# EXPERIMENT (issue #13): point rebop at a local fork of v0.9.7 that adds
-# `Gillespie::advance_until_or_reactions(tmax, max_reactions)` -- the upstream loop with one extra
-# stopping condition, so a Gillespie block can be budgeted by reaction count instead of by a
-# duration inferred from the entry propensity.
-#
-# This is a *path* patch and therefore only works on a checkout that also has the fork beside it;
-# CI and other machines will fail to resolve it. Before merging anywhere, replace it with a git
-# dependency on the published fork:
-#     rebop = { git = "https://github.com/<org>/rebop", branch = "num-reactions-stopping-condition" }
-[patch.crates-io]
-rebop = { path = "../rebop" }
