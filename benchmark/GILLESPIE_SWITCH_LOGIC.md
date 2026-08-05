@@ -1156,7 +1156,7 @@ picture is the opposite.
    deterministic policies lose to timing at natural populations, and the worst single scenario for
    every one of them is `oregonator_n1e5`.
 
-#### Oregonator: where deterministic switching still loses
+#### Oregonator appeared to be where deterministic switching loses -- it is not
 
 | policy | ratio to timing on `oregonator_n1e5` |
 |---|---:|
@@ -1166,10 +1166,12 @@ picture is the opposite.
 | `cost_model_cold` | 1.253x |
 | `cost_model_warm` | 1.279x |
 
-Adaptive wall-clock measurement beats **every** deterministic policy by 20-28% on the stiff
-oscillator -- which is precisely the CRN the wall-clock rule was introduced to fix, where the proxy
-rule had been 30-90x too slow. A threshold on the prospective score, however well calibrated, cannot
-see what the wall-clock EMAs see there.
+> [!WARNING]
+> **This table is retracted.** All four deterministic policies execute the identical mode sequence
+> on this CRN, so it reports one run measured four times, and the differences are noise. A dedicated
+> sweep (below) measures a 17% spread across policy-equivalent thresholds and finds the adaptive
+> policy itself swinging 34% between runs. It is kept here because the reasoning that followed from
+> it shaped several later decisions.
 
 A "hybrid" that keeps the wall-clock override is **not** an acceptable answer here, and it is worth
 saying so explicitly because it is a tempting one. The entire point of a deterministic rule is that
@@ -1208,12 +1210,52 @@ reaches 250, so every candidate from 250 upward executes the identical run. Maki
 rule batch during an Oregonator spike would need a threshold below about 40, an order of magnitude
 under anything that works globally.
 
-So either a very low threshold does batch the spikes and is fast -- in which case the frozen-state
-break-even is the wrong criterion for stiff oscillators, since it is measured at a fixed state and
-cannot see that a batch call advances far more simulated time than a Gillespie call when the
-propensity spikes -- or no threshold reaches the adaptive policy's time, in which case its advantage
-does not come from those 14 batch calls at all and a threshold cannot address it.
-`oregonator_threshold_probe.py` sweeps thresholds down to 0.5 to tell these apart.
+#### Resolved: there is no Oregonator gap, and the oracle was right
+
+`oregonator_threshold_probe.py` swept thresholds from 0.5 to 500 on the three CRNs where
+deterministic switching appeared to lose. The result retracts the gap.
+
+| `oregonator_n1e5` | seconds | vs timing | batch | Gillespie | mode sequence |
+|---|---:|---:|---:|---:|---|
+| timing | 0.16002 | 1.000x | 18 | 15,805 | |
+| `T = 0.5` | 4.72976 | **29.6x** | 411,250 | 0 | batches everything |
+| `T = 8` | 1.65198 | 10.3x | 111,964 | 2,974 | |
+| `T = 25` | 0.70152 | 4.38x | 59,712 | 7,572 | |
+| `T = 40` | 0.14299 | 0.894x | 1 | 17,636 | identical from here down |
+| **`T = 60`** | **0.12263** | **0.766x** | 1 | 17,636 | identical |
+| `T = 250` | 0.12297 | 0.768x | 1 | 17,636 | identical |
+| `T = 500` | 0.12878 | 0.805x | 1 | 17,636 | identical |
+
+Three things follow, and the first two are corrections.
+
+1. **The gap was noise.** Every threshold from 40 upward executes the *identical* mode sequence --
+   one batch call and 17,636 Gillespie calls -- so those rows are the same run measured five times.
+   Their spread is 0.1226 to 0.1430, i.e. **17%**, which is the noise floor for a run this short.
+   The adaptive policy is separately non-reproducible by construction and measured 0.1191s in the
+   held-out head-to-head against 0.1600s here, a **34% swing**. The claimed 20-28% deficit sits
+   entirely inside those two spreads, and in this run the deterministic policies *beat* timing by
+   23%. The earlier conclusion is withdrawn.
+2. **The frozen-state oracle was right, emphatically.** It said batching is never locally optimal
+   for the Oregonator, and forcing batches confirms it: `T = 0.5` is **29.6x** slower, and on
+   Brusselator `T = 1` is **156x** slower. The hypothesis that the local break-even is "the wrong
+   criterion for stiff oscillators" is refuted -- it is exactly right, and refusing to batch is the
+   correct behaviour.
+3. **Brusselator behaves the same way.** Every threshold from 4 upward gives one batch and 5,476
+   Gillespie calls; their measured times span 0.0683 to 0.0885, a **30%** spread on identical runs.
+   The best deterministic time is 0.737x the adaptive policy.
+
+Rössler is the one CRN where the adaptive policy genuinely leads, and only modestly: 1.7917s against
+1.8637-2.0673s for every threshold, so 1.04-1.15x. Note that on Rössler thresholds of 60 and below
+all force *complete* batching (161,441 batch calls, zero Gillespie), which is another
+policy-equivalent block.
+
+> [!CAUTION]
+> This was a self-inflicted error worth recording. The document already warns that two thresholds
+> which never straddle an encountered score execute the identical run, so timing differences between
+> them are noise -- and the head-to-head recorded `batch_calls` and `gillespie_calls` all along. The
+> mode signatures were not checked before declaring a gap. **Check policy-equivalence before
+> attributing any difference to a policy**, especially on short runs, where the noise floor reaches
+> 30%.
 
 > [!NOTE]
 > Deterministic policies beat timing by about 15% on boundary-placed scenarios (0.851-0.858) and
