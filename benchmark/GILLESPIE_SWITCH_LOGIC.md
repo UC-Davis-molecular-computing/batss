@@ -1171,10 +1171,49 @@ oscillator -- which is precisely the CRN the wall-clock rule was introduced to f
 rule had been 30-90x too slow. A threshold on the prospective score, however well calibrated, cannot
 see what the wall-clock EMAs see there.
 
-This is the strongest argument for a hybrid rather than a replacement: use the cost-model threshold
-as the decision rule and the prior, and retain the measured-throughput override for the cases where
-the model is wrong about a specific machine or a specific regime. The current wall-clock policy
-already has that structure; what it lacks is a good prior, which is what the cost model supplies.
+A "hybrid" that keeps the wall-clock override is **not** an acceptable answer here, and it is worth
+saying so explicitly because it is a tempting one. The entire point of a deterministic rule is that
+the mode sequence does not depend on machine timing: runs replay exactly, results do not shift when
+the CPU is busy, and the same input gives the same output everywhere. Reintroducing a measured-time
+override to cover the cases the model misses gives all of that back up. Whatever closes this gap has
+to be deterministic.
+
+#### What the Oregonator gap actually is
+
+Mode splits on `oregonator_n1e5`, median over seeds:
+
+| policy | batch calls | Gillespie calls | mode switches | seconds |
+|---|---:|---:|---:|---:|
+| timing | **14** | **14,405** | 7 | **0.1191** |
+| every deterministic policy tested | **1** | 18,459 | 1 | 0.1433-0.1502 |
+
+The deterministic policies never batch at all -- the single call is the mandatory initial batch --
+while the adaptive policy batches 14 times and needs 22% fewer Gillespie calls.
+
+The frozen-state oracle says the deterministic policies are *right* to refuse. Across 16 states
+sampled along the Oregonator trajectory, batching is locally optimal at **none** of them:
+
+| | |
+|---|---|
+| peak score along the trajectory | 39.79 |
+| `T*` range along the trajectory | 393 .. 529 |
+| peak `score / T*` | **0.077** |
+| states where `score > T*` | **0 / 16** |
+
+For contrast the same collection finds 8/16 batch-optimal states for Rössler and 6/16 for Shrinking,
+so this is a property of the stiff oscillator, not of the measurement.
+
+That also explains why no threshold tested so far changes anything on this CRN: the score never
+reaches 250, so every candidate from 250 upward executes the identical run. Making a deterministic
+rule batch during an Oregonator spike would need a threshold below about 40, an order of magnitude
+under anything that works globally.
+
+So either a very low threshold does batch the spikes and is fast -- in which case the frozen-state
+break-even is the wrong criterion for stiff oscillators, since it is measured at a fixed state and
+cannot see that a batch call advances far more simulated time than a Gillespie call when the
+propensity spikes -- or no threshold reaches the adaptive policy's time, in which case its advantage
+does not come from those 14 batch calls at all and a threshold cannot address it.
+`oregonator_threshold_probe.py` sweeps thresholds down to 0.5 to tell these apart.
 
 > [!NOTE]
 > Deterministic policies beat timing by about 15% on boundary-placed scenarios (0.851-0.858) and
