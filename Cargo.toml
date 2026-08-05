@@ -46,6 +46,7 @@ compensated-summation = "0.3.1"
 # the Gillespie engine can be made directly instead of worked around here. The fork tracks upstream
 # main and currently adds `Gillespie::reactions_until_time_or_reactions`, which lets a Gillespie
 # block be budgeted by reaction count instead of by a duration inferred from the entry propensity.
+# Upstream PR: https://github.com/Armavica/rebop/pull/97
 #
 # Pinned by `rev` rather than `branch` so a build is reproducible and a fork-side commit cannot
 # silently change what this crate compiles against. To take a new fork commit, update the rev.
