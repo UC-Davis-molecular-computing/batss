@@ -1244,10 +1244,49 @@ Three things follow, and the first two are corrections.
    Gillespie calls; their measured times span 0.0683 to 0.0885, a **30%** spread on identical runs.
    The best deterministic time is 0.737x the adaptive policy.
 
-Rössler is the one CRN where the adaptive policy genuinely leads, and only modestly: 1.7917s against
-1.8637-2.0673s for every threshold, so 1.04-1.15x. Note that on Rössler thresholds of 60 and below
-all force *complete* batching (161,441 batch calls, zero Gillespie), which is another
-policy-equivalent block.
+Rössler appeared to be the one CRN where the adaptive policy genuinely leads, at 1.04-1.15x. It does
+not either; see below. Note that on Rössler thresholds of 60 and below all force *complete* batching
+(161,441 batch calls, zero Gillespie), which is another policy-equivalent block spanning 11%.
+
+#### Rössler, checked properly: no adaptive advantage anywhere
+
+`paired_policy_check.py` compares policies **per seed**, so each comparison is between runs of the
+same trajectory rather than between pooled medians, and applies a sign test over seeds. Eight seeds,
+three repeats, `rossler_n1e5`:
+
+| policy | paired ratio to timing, by seed | median | beats timing |
+|---|---|---:|---:|
+| `T = 8` | 1.020 1.038 0.981 1.013 0.958 0.965 1.025 0.920 | 0.997x | 4/8 |
+| `T = 100` | 1.065 1.058 0.996 1.066 0.946 1.018 1.000 0.954 | 1.009x | 3/8 |
+| `T = 250` | 1.009 1.042 0.946 1.035 0.907 0.992 0.955 0.901 | 0.973x | 5/8 |
+| `T = 500` | 1.059 1.079 0.991 1.133 0.879 0.983 0.997 0.977 | 0.994x | 5/8 |
+| `cost_model_cold` | 0.944 0.525 1.000 1.086 0.955 0.982 1.034 0.903 | 0.969x | 5/8 |
+| **`cost_model_warm`** | 0.944 0.832 0.901 1.021 0.854 0.967 0.975 0.908 | **0.926x** | **7/8** |
+
+Measured within-policy noise floor: 1.040x median spread across repeats of the same policy and seed.
+
+Every deterministic policy sits at or below 1.0. The adaptive policy's apparent lead was, once more,
+an artifact of comparing pooled medians rather than paired runs. `cost_model_warm` beating it in 7 of
+8 seeds is the strongest single result in this document -- under a sign test that is p = 0.035
+one-sided -- though with a paired median of 0.926x it is a modest effect, and the harness's own
+"decisive" label is too strict in demanding a clean sweep.
+
+**Taken with the Oregonator and Brusselator retractions above, there is now no CRN in this suite
+where adaptive wall-clock switching measurably beats a deterministic rule.** All three apparent
+cases dissolved under a policy-equivalence or paired-comparison check.
+
+#### Determinism, quantified
+
+The same run makes the case for determinism concretely. Across 24 runs (8 seeds x 3 repeats):
+
+| policy | distinct mode signatures |
+|---|---|
+| timing | **24** -- a different engine schedule on every run |
+| every deterministic policy | **8** -- exactly one per seed |
+
+The adaptive policy does not reproduce even when given the same seed, because its decisions depend
+on measured wall-clock. Every deterministic policy reproduces exactly. That is the property being
+bought, and it is bought at no measured cost in speed.
 
 > [!CAUTION]
 > This was a self-inflicted error worth recording. The document already warns that two thresholds
