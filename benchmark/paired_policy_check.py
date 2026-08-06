@@ -34,6 +34,7 @@ from typing import Any
 
 import threshold_cost_model as tcm
 from cost_model_head_to_head import Contender, fitted_coefficients
+from policy_matrix_experiment import build_scenarios
 from switching_policy_comparison import Scenario, _make_sim, comparison_scenarios
 
 HERE = Path(__file__).resolve().parent
@@ -72,11 +73,23 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--cap-seconds", type=float, default=30.0)
     parser.add_argument("--thresholds", type=str, default="8,100,250,500")
+    parser.add_argument("--probe-repeats", type=int, default=9)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
     seeds = [args.seed_base + i for i in range(args.seeds)]
 
-    scenario = next(s for s in comparison_scenarios() if s.slug == args.scenario)
+    # Look in both scenario sources: the natural-population set, and the boundary-placed set where
+    # each CRN is scaled so its trajectory starts near its own break-even. The cost model's claimed
+    # advantage lives in the latter, so it has to be checkable here.
+    available = list(comparison_scenarios())
+    if not any(s.slug == args.scenario for s in available):
+        placed, _ = build_scenarios(probe_repeats=args.probe_repeats, seed=args.seed_base)
+        available += placed
+    matches = [s for s in available if s.slug == args.scenario]
+    if not matches:
+        raise SystemExit(f"unknown scenario {args.scenario!r}; available: "
+                         + ", ".join(sorted(s.slug for s in available)))
+    scenario = matches[0]
     cold_b, cold_g = fitted_coefficients([HERE / "batch_cost_profile_timings_allg.csv",
                                           HERE / "batch_cost_profile_timings_allg_seed2.csv"])
     warm_b, warm_g = fitted_coefficients([HERE / "batch_cost_profile_timings_warm.csv",

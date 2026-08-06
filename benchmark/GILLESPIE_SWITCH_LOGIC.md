@@ -1275,6 +1275,35 @@ one-sided -- though with a paired median of 0.926x it is a modest effect, and th
 where adaptive wall-clock switching measurably beats a deterministic rule.** All three apparent
 cases dissolved under a policy-equivalence or paired-comparison check.
 
+#### The structural case, on paired data
+
+The same paired treatment applied to two CRNs whose optimal constants are **opposite**. Paired
+medians against the adaptive policy, eight seeds each; noise floors 1.087x and 1.048x.
+
+| policy | `shrinking_n2e6` | `dense_support_q12_r2` | worst of the two |
+|---|---:|---:|---:|
+| `T = 500` | 0.828x (8/8) | **1.673x** (1/8) | 1.673x |
+| `T = 250` | **0.802x** (7/8) | 1.118x (1/8) | 1.118x |
+| `T = 100` | 0.890x (7/8) | **0.931x** (6/8) | **0.931x** |
+| `cost_model_cold` | 0.830x (7/8) | 0.954x (6/8) | 0.954x |
+| `cost_model_warm` | 0.813x (8/8) | 1.065x (1/8) | 1.065x |
+
+`T = 250` is the best policy on Shrinking and 12% *worse* than adaptive on `dense_support`;
+`T = 500` is fine on one and catastrophic on the other. The cost model lands near-best on both
+without being told which CRN it is running, which is the entire structural claim, now supported by
+paired per-seed data rather than by pooled medians.
+
+Two qualifications, both against the version of this claim made earlier in this document:
+
+- **`T = 100` matches or beats `cost_model_cold` on both of these scenarios.** On this pair the
+  model is second, not first. It is only on the wider matrix that low constants fall away
+  (`constant_125` 0.981 central and `constant_60` 1.127, against 0.878 for the scaled cost model),
+  so the defensible statement is that no constant is good everywhere and the model is consistently
+  near-best everywhere -- not that the model is the best policy on any given CRN.
+- **`cost_model_warm` is clearly worse here** (1.065x) than `cost_model_cold` (0.954x). Warm at
+  scale 1.0 is an effectively ~1.8x higher threshold than cold at 0.368, and this CRN wants more
+  batching, not less. The warm model's advantage is portability, not accuracy.
+
 #### Determinism, quantified
 
 The same run makes the case for determinism concretely. Across 24 runs (8 seeds x 3 repeats):
