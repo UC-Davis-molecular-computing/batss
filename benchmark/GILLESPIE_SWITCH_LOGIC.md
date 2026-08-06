@@ -1330,6 +1330,92 @@ bought, and it is bought at no measured cost in speed.
 > lose by about 10% on natural ones. Which number is "the" answer depends entirely on the scenario
 > mix, and neither mix is a random sample of real use. Quote the split, not the aggregate.
 
+## What to run next, and how (2026-08-06)
+
+Two methodological problems were found after the results above were collected. Both are fixed in the
+harnesses but **not** in the recorded numbers, so the experiments below need running before any of
+the policy comparisons should be trusted further.
+
+### Preconditions -- read before starting
+
+1. **Power state.** Every timing number in this document was collected **on battery**, at 1400 MHz
+   base clock on an Intel Core Ultra 7 155H. Plugged in, the processor clocks much higher, so an AC
+   run cannot be compared against any of it.
+   - Staying on battery keeps the new numbers comparable with the existing ones.
+   - Plugging in means **everything must be recollected**, including the cold/warm cost profiles.
+   - `python benchmark/measurement_conditions.py` prints the current state. Every harness now stamps
+     its JSON output with it, and `measurement_conditions.comparable(a, b)` refuses a cross-power
+     comparison. Older result files predate this and carry no stamp, which is why it is not possible
+     to verify after the fact that the cold and warm collections were taken at similar battery
+     levels -- and their ratio, 0.617x, is what the cold-measurement finding rests on.
+2. **The machine must be otherwise idle**, and nothing else may run concurrently. Parallel work
+   invalidates the measurement; the noise floor is already 4-30% depending on scenario.
+3. **Close any Jupyter kernel holding `import batss`**, or the `.pyd` cannot be replaced on rebuild.
+4. Battery drains across a long session and throttles progressively. Paired within-run comparisons
+   survive that; comparisons between the start and end of a run do not.
+
+### The ordering bias, and why it matters
+
+`timing` was executed **first** for every scenario and seed in all three comparison harnesses, with
+policies in fixed order. Any monotonic drift -- thermal, or battery drain -- therefore accrued to
+whichever policy ran first, which was always the adaptive one. `global_constant_sweep.py` now
+rotates the execution order and records `execution_position` per run, so a residual position effect
+is measurable rather than assumed absent. The other harnesses have **not** been fixed; their results
+should be treated as provisional on this point.
+
+### Experiment 1 -- which fixed threshold is actually best (highest priority)
+
+`T = 500` came from an early pilot and `T = 250` from a later one, but both selections rest on
+comparisons since retracted for pooling medians across policy-equivalent runs. Paired checks then
+found `T = 100` matching or beating both on two CRNs. **The constant the cost model is measured
+against is therefore not established**, which undermines every "the model beats a constant" claim.
+
+```powershell
+python benchmark/global_constant_sweep.py --seeds 6 --seed-base 1301 --repeats 2 --cap-seconds 8
+```
+
+Races seven constants (60 to 1000) plus the adaptive policy and both cost models across the full
+matrix. Roughly 1-2 hours. It is paired per seed, measures regret against the per-run best rather
+than against the non-reproducible adaptive policy, rotates execution order, and reports results
+twice: over all scenarios, and over only those whose mode signatures show the constants actually
+executing different runs.
+
+**Read the discriminating-scenarios line first.** If most scenarios cannot distinguish the
+constants, the all-scenario averages are mostly noise -- that is exactly what produced three
+retractions in this document.
+
+### Experiment 2 -- re-run the paired checks with rotation
+
+`paired_policy_check.py` still has the fixed-order bias. Re-run on the scenarios whose results are
+being relied on:
+
+```powershell
+python benchmark/paired_policy_check.py --scenario shrinking_n2e6      --seeds 8 --repeats 3
+python benchmark/paired_policy_check.py --scenario dense_support_q12_r2 --seeds 8 --repeats 3
+python benchmark/paired_policy_check.py --scenario rossler_n1e5         --seeds 8 --repeats 3
+```
+
+About 20 minutes each. These are the results the structural case rests on, so they should be clean.
+
+### Experiment 3 -- close the order-3 gap
+
+No order-3 CRN survives boundary placement: Brusselator cannot reach its break-even below the
+population cap, and the `collision_o3_*` family times out there. So no end-to-end evidence
+constrains behaviour at `o = 3`, while `o` carries one of the more reliable cost-model coefficients.
+The cost model does predict Brusselator's *trajectory* states well (bias 0.920), so the gap is in
+the policy evidence, not the cost model. Needs either an order-3 CRN whose boundary is reachable, or
+a raised population cap with a longer time budget.
+
+### Experiment 4 -- the unexplained residual
+
+After correcting for cold measurement, the warm model still needs `alpha = 0.574` [0.513, 0.648].
+This is **not** a cost-model error: the model predicts `T*` at trajectory states well, including its
+`q` dependence (`corr(q, log predicted/measured T*) = +0.118`). The gap is between "which engine is
+cheaper right now" and "which fixed threshold minimises a whole trajectory", so it is a property of
+the policy problem. Candidates not yet tested, all deterministic: hysteresis (a deadband between
+entering and leaving batch mode, which the selector still lacks), and a threshold that anticipates
+the drift in `score` along the trajectory rather than reading it pointwise.
+
 ### Honest limitations
 
 - **Held-out slopes are shallow where a family is the sole source of a feature.** Holding out
