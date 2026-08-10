@@ -1,0 +1,165 @@
+{
+  "seeds": [
+    1601,
+    1602,
+    1603,
+    1604,
+    1605,
+    1606,
+    1607,
+    1608
+  ],
+  "repeats": 2,
+  "constants": [
+    60.0,
+    100.0,
+    150.0,
+    250.0,
+    400.0,
+    600.0,
+    1000.0
+  ],
+  "measurement_conditions": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",
+    "power_source": "on_ac",
+    "battery_percent": 100,
+    "current_clock_mhz": 1400,
+    "max_clock_mhz": 1400,
+    "power_scheme": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)"
+  },
+  "all": {
+    "timing": {
+      "regret": 1.2653701071829913,
+      "worst": 2.3043689275645196,
+      "vs_timing": 1.0
+    },
+    "timing_ovr1": {
+      "regret": 1.3170827657381936,
+      "worst": 2.3779396733918876,
+      "vs_timing": 1.0166058396647886
+    },
+    "timing_ovr2": {
+      "regret": 1.2624625277061097,
+      "worst": 1.7482001441434494,
+      "vs_timing": 0.989333930044964
+    },
+    "timing_ovr1_eager": {
+      "regret": 1.304789048046637,
+      "worst": 2.3491497742972145,
+      "vs_timing": 1.0158800280996974
+    },
+    "T=100": {
+      "regret": 1.2547491538432203,
+      "worst": 1.9413257438316398,
+      "vs_timing": 0.9901900423994596
+    },
+    "T=250": {
+      "regret": 1.1585095907403862,
+      "worst": 1.4072050047247266,
+      "vs_timing": 0.8850756555247166
+    },
+    "T=400": {
+      "regret": 1.1754021394296408,
+      "worst": 1.6156199301392518,
+      "vs_timing": 0.9075447197806813
+    },
+    "cost_model_cold": {
+      "regret": 1.1793127450971805,
+      "worst": 1.5711928499011154,
+      "vs_timing": 0.8931155745861236
+    },
+    "cost_model_warm": {
+      "regret": 1.1359446269411166,
+      "worst": 1.3310431890424266,
+      "vs_timing": 0.8663857066065744
+    }
+  },
+  "discriminating": {
+    "timing": {
+      "regret": 1.2829609325569244,
+      "worst": 2.3043689275645196,
+      "vs_timing": 1.0
+    },
+    "timing_ovr1": {
+      "regret": 1.2102122509660342,
+      "worst": 1.6956805637973806,
+      "vs_timing": 0.9796343895392086
+    },
+    "timing_ovr2": {
+      "regret": 1.2092511994361363,
+      "worst": 1.7482001441434494,
+      "vs_timing": 0.972138057148449
+    },
+    "timing_ovr1_eager": {
+      "regret": 1.2183577197773134,
+      "worst": 1.8246274392421675,
+      "vs_timing": 0.9805749607412045
+    },
+    "T=100": {
+      "regret": 1.3628722027497655,
+      "worst": 1.9413257438316398,
+      "vs_timing": 0.9939243525448809
+    },
+    "T=250": {
+      "regret": 1.1925039416451968,
+      "worst": 1.4072050047247266,
+      "vs_timing": 0.8755430890516883
+    },
+    "T=400": {
+      "regret": 1.149517970582514,
+      "worst": 1.6156199301392518,
+      "vs_timing": 0.9010970152846304
+    },
+    "cost_model_cold": {
+      "regret": 1.191405023871468,
+      "worst": 1.5711928499011154,
+      "vs_timing": 0.8819191874397432
+    },
+    "cost_model_warm": {
+      "regret": 1.1123397471453085,
+      "worst": 1.3310431890424266,
+      "vs_timing": 0.8548566877040681
+    }
+  },
+  "discriminating_scenarios": [
+    "dimerization_r05",
+    "lotka_volterra_r05",
+    "shrinking_r05",
+    "shrinking_r1",
+    "shrinking_r2",
+    "shrinking_no_b_decay_r05",
+    "shrinking_no_b_decay_r1",
+    "shrinking_no_b_decay_r2",
+    "shrinking_split_b_decay_r05",
+    "shrinking_split_b_decay_r1",
+    "shrinking_split_b_decay_r2",
+    "shrinking_b_decay_channels_1_r05",
+    "shrinking_b_decay_channels_1_r1",
+    "shrinking_b_decay_channels_1_r2",
+    "shrinking_b_decay_channels_2_r05",
+    "shrinking_b_decay_channels_2_r1",
+    "shrinking_b_decay_channels_2_r2",
+    "shrinking_b_decay_channels_4_r05",
+    "shrinking_b_decay_channels_4_r1",
+    "shrinking_b_decay_channels_4_r2",
+    "shrinking_b_decay_channels_8_r05",
+    "shrinking_b_decay_channels_8_r1",
+    "shrinking_b_decay_channels_8_r2",
+    "dense_support_q4_r05",
+    "dense_support_q4_r1",
+    "dense_support_q6_r05",
+    "dense_support_q6_r1",
+    "dense_support_q6_r2",
+    "dense_support_q8_r05",
+    "dense_support_q8_r1",
+    "dense_support_q8_r2",
+    "dense_support_q12_r05",
+    "dense_support_q12_r1",
+    "dense_support_q12_r2",
+    "collision_o2_g0_n1000000_r05",
+    "collision_o2_g0_n1000000_r1",
+    "collision_o2_g1_n1000000_r05",
+    "collision_o2_g2_n1000000_r05"
+  ]
+}

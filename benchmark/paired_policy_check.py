@@ -74,9 +74,20 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--cap-seconds", type=float, default=30.0)
     parser.add_argument("--thresholds", type=str, default="8,100,250,500")
     parser.add_argument("--probe-repeats", type=int, default=9)
+    parser.add_argument("--cold-timings", action="append", default=None,
+                        help="cost CSVs for the cold-fitted model; MUST match this run's "
+                             "machine conditions (power state especially)")
+    parser.add_argument("--warm-timings", action="append", default=None,
+                        help="cost CSVs for the warm-fitted model")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
     seeds = [args.seed_base + i for i in range(args.seeds)]
+    args.cold_timings = args.cold_timings or [
+        HERE / "batch_cost_profile_timings_allg.csv",
+        HERE / "batch_cost_profile_timings_allg_seed2.csv"]
+    args.warm_timings = args.warm_timings or [
+        HERE / "batch_cost_profile_timings_warm.csv",
+        HERE / "batch_cost_profile_timings_warm_seed2.csv"]
 
     # Look in both scenario sources: the natural-population set, and the boundary-placed set where
     # each CRN is scaled so its trajectory starts near its own break-even. The cost model's claimed
@@ -90,10 +101,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         raise SystemExit(f"unknown scenario {args.scenario!r}; available: "
                          + ", ".join(sorted(s.slug for s in available)))
     scenario = matches[0]
-    cold_b, cold_g = fitted_coefficients([HERE / "batch_cost_profile_timings_allg.csv",
-                                          HERE / "batch_cost_profile_timings_allg_seed2.csv"])
-    warm_b, warm_g = fitted_coefficients([HERE / "batch_cost_profile_timings_warm.csv",
-                                          HERE / "batch_cost_profile_timings_warm_seed2.csv"])
+    # Coefficients must come from cost data measured under the SAME machine conditions as this run.
+    # Batch and Gillespie do not slow by the same factor when conditions change -- 1.365x versus
+    # 1.221x measured between a battery session and an AC one -- so T* itself shifts by about 12%
+    # and coefficients fitted elsewhere predict the wrong threshold.
+    cold_b, cold_g = fitted_coefficients([Path(x) for x in args.cold_timings])
+    warm_b, warm_g = fitted_coefficients([Path(x) for x in args.warm_timings])
     contenders = [Contender("timing", HEURISTIC_WALLCLOCK)]
     contenders += [Contender(f"T={t:g}", HEURISTIC_PROSPECTIVE, threshold=float(t))
                    for t in (float(x) for x in args.thresholds.split(",") if x.strip())]

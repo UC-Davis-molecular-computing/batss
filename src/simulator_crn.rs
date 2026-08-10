@@ -319,6 +319,28 @@ pub struct SwitchState {
     #[pyo3(get)]
     pub proxy_threshold: f64,
 
+    // --- wall-clock heuristic tuning, settable so the policy can be tuned rather than assumed ---
+    /// How much cheaper the non-proxy mode must measure before the wall-clock rule will override the
+    /// proxy's choice. **This is the single most consequential number in the adaptive policy**, and
+    /// its default of 4.0 means the policy does *not* pick the cheaper engine: it follows the old
+    /// proxy rule unless the alternative is more than 4x cheaper. Whenever the better engine is only
+    /// 1.5-3x better the gate never opens, and measurement shows that costing up to 2x on
+    /// Gillespie-favoured states. Set to 1.0 to make it genuinely greedy -- pick whichever mode
+    /// measures cheaper -- which is what a proxy for "optimal" should do.
+    #[pyo3(get, set)]
+    pub wdt_override_factor: f64,
+    /// Iterations between probes of the other mode while bootstrapping (before both are measured).
+    #[pyo3(get, set)]
+    pub wdt_probe_interval: u64,
+    /// Iterations between probes once both modes have an estimate. Large by default because a
+    /// Gillespie probe commits a chunk of continuous time to the costlier engine; lowering it trades
+    /// throughput for fresher estimates when the trajectory changes regime.
+    #[pyo3(get, set)]
+    pub wdt_probe_interval_committed: u64,
+    /// EMA smoothing for the per-mode wall-clock and dt averages. Higher forgets faster.
+    #[pyo3(get, set)]
+    pub wdt_ema_alpha: f64,
+
     // --- measured throughput, per mode ---
     // Exponentially-weighted moving averages of wall-clock seconds and continuous time advanced per
     // engine call. A mode's cost is their RATIO (wall_ema / dt_ema): a dt-weighted average, which is
@@ -363,6 +385,10 @@ impl SwitchState {
         SwitchState {
             heuristic: HEURISTIC_WALLCLOCK,
             proxy_threshold,
+            wdt_override_factor: WDT_OVERRIDE_FACTOR,
+            wdt_probe_interval: WDT_PROBE_INTERVAL,
+            wdt_probe_interval_committed: WDT_PROBE_INTERVAL_COMMITTED,
+            wdt_ema_alpha: WDT_EMA_ALPHA,
             batch_wall_ema: 0.0,
             batch_dt_ema: 0.0,
             gillespie_wall_ema: 0.0,
@@ -389,6 +415,11 @@ impl SwitchState {
         *self = SwitchState {
             heuristic: self.heuristic,
             proxy_threshold: self.proxy_threshold,
+            // Tuning is user-set configuration too, so a reset must not silently restore defaults.
+            wdt_override_factor: self.wdt_override_factor,
+            wdt_probe_interval: self.wdt_probe_interval,
+            wdt_probe_interval_committed: self.wdt_probe_interval_committed,
+            wdt_ema_alpha: self.wdt_ema_alpha,
             ..SwitchState::new(self.proxy_threshold)
         };
     }
@@ -417,16 +448,20 @@ impl SwitchState {
     fn record(&mut self, gillespie: bool, wall: f64, dt: f64) {
         if gillespie {
             if self.has_gillespie_est {
-                self.gillespie_wall_ema = WDT_EMA_ALPHA * wall + (1.0 - WDT_EMA_ALPHA) * self.gillespie_wall_ema;
-                self.gillespie_dt_ema = WDT_EMA_ALPHA * dt + (1.0 - WDT_EMA_ALPHA) * self.gillespie_dt_ema;
+                self.gillespie_wall_ema =
+                self.wdt_ema_alpha * wall + (1.0 - self.wdt_ema_alpha) * self.gillespie_wall_ema;
+                self.gillespie_dt_ema =
+                self.wdt_ema_alpha * dt + (1.0 - self.wdt_ema_alpha) * self.gillespie_dt_ema;
             } else {
                 self.gillespie_wall_ema = wall;
                 self.gillespie_dt_ema = dt;
                 self.has_gillespie_est = true;
             }
         } else if self.has_batch_est {
-            self.batch_wall_ema = WDT_EMA_ALPHA * wall + (1.0 - WDT_EMA_ALPHA) * self.batch_wall_ema;
-            self.batch_dt_ema = WDT_EMA_ALPHA * dt + (1.0 - WDT_EMA_ALPHA) * self.batch_dt_ema;
+            self.batch_wall_ema =
+                self.wdt_ema_alpha * wall + (1.0 - self.wdt_ema_alpha) * self.batch_wall_ema;
+            self.batch_dt_ema =
+                self.wdt_ema_alpha * dt + (1.0 - self.wdt_ema_alpha) * self.batch_dt_ema;
         } else {
             self.batch_wall_ema = wall;
             self.batch_dt_ema = dt;
@@ -778,6 +813,52 @@ impl BatchSimulator {
         self.switch.proxy_threshold = value;
     }
 
+    /// How much cheaper the non-proxy mode must measure before the wall-clock rule overrides the
+    /// proxy's choice. See :class:`SwitchState`. Forwarded here because `BatchSimulator.switch`
+    /// hands Python a snapshot, so assigning to its fields would be silently discarded.
+    #[getter]
+    pub fn wdt_override_factor(&self) -> f64 {
+        self.switch.wdt_override_factor
+    }
+
+    #[setter]
+    pub fn set_wdt_override_factor(&mut self, value: f64) {
+        self.switch.wdt_override_factor = value;
+    }
+
+    /// Iterations between probes of the other mode while bootstrapping. See :class:`SwitchState`.
+    #[getter]
+    pub fn wdt_probe_interval(&self) -> u64 {
+        self.switch.wdt_probe_interval
+    }
+
+    #[setter]
+    pub fn set_wdt_probe_interval(&mut self, value: u64) {
+        self.switch.wdt_probe_interval = value;
+    }
+
+    /// Iterations between probes once both modes are measured. See :class:`SwitchState`.
+    #[getter]
+    pub fn wdt_probe_interval_committed(&self) -> u64 {
+        self.switch.wdt_probe_interval_committed
+    }
+
+    #[setter]
+    pub fn set_wdt_probe_interval_committed(&mut self, value: u64) {
+        self.switch.wdt_probe_interval_committed = value;
+    }
+
+    /// EMA smoothing for the measured per-mode throughput. See :class:`SwitchState`.
+    #[getter]
+    pub fn wdt_ema_alpha(&self) -> f64 {
+        self.switch.wdt_ema_alpha
+    }
+
+    #[setter]
+    pub fn set_wdt_ema_alpha(&mut self, value: f64) {
+        self.switch.wdt_ema_alpha = value;
+    }
+
     /// Experimental deterministic estimate of active reactions in a batch prepared at the K value
     /// returned by `k_reset_target`. This is pure and does not rebuild transition arrays.
     pub fn prospective_batch_score(&self) -> f64 {
@@ -1008,9 +1089,9 @@ impl BatchSimulator {
                 let cur = self.do_gillespie;
                 let both_measured = self.switch.has_est(true) && self.switch.has_est(false);
                 let interval = if both_measured {
-                    WDT_PROBE_INTERVAL_COMMITTED
+                    self.switch.wdt_probe_interval_committed
                 } else {
-                    WDT_PROBE_INTERVAL
+                    self.switch.wdt_probe_interval
                 };
                 if self.switch.has_est(cur) && self.switch.iters_since_probe >= interval {
                     // Probe the other mode (one switch iteration, excluded from the EMA, then one
@@ -1022,7 +1103,8 @@ impl BatchSimulator {
                     // Both modes measured: follow the proxy unless the other is decisively cheaper.
                     let non_proxy = !proxy_gillespie;
                     let override_proxy =
-                        self.switch.wdt(non_proxy) * WDT_OVERRIDE_FACTOR < self.switch.wdt(proxy_gillespie);
+                        self.switch.wdt(non_proxy) * self.switch.wdt_override_factor
+                            < self.switch.wdt(proxy_gillespie);
                     self.set_mode(if override_proxy { non_proxy } else { proxy_gillespie });
                 } else {
                     // Bootstrap: follow the proxy (also measures whichever mode it runs).

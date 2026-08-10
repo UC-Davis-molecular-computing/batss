@@ -64,9 +64,33 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--probe-repeats", type=int, default=9)
     parser.add_argument("--cap-seconds", type=float, default=8.0)
+    parser.add_argument("--override-factors", type=str, default="",
+                        help="extra adaptive policies at these override factors. 1.0 makes "
+                             "it genuinely greedy (pick the cheaper measured mode); the "
+                             "shipped default of 4.0 makes it follow the old proxy rule "
+                             "unless the alternative is >4x cheaper")
+    parser.add_argument("--eager-probe", action="store_true",
+                        help="also race a greedy policy that probes far more often, to see "
+                             "whether stale estimates rather than the override gate are "
+                             "what limits the adaptive policy")
+    parser.add_argument("--constants", type=str, default=None,
+                        help="comma-separated fixed thresholds to race (default: the full "
+                             "grid). Narrow it to run a focused head-to-head with more "
+                             "seeds, which buys statistical power where it matters.")
+    parser.add_argument("--cold-timings", action="append", default=None,
+                        help="cost CSVs for the cold-fitted model (must match this run's "
+                             "machine conditions)")
+    parser.add_argument("--warm-timings", action="append", default=None,
+                        help="cost CSVs for the warm-fitted model")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     args = parser.parse_args(argv)
     seeds = [args.seed_base + i for i in range(args.seeds)]
+    args.cold_timings = args.cold_timings or [
+        HERE / "batch_cost_profile_timings_allg.csv",
+        HERE / "batch_cost_profile_timings_allg_seed2.csv"]
+    args.warm_timings = args.warm_timings or [
+        HERE / "batch_cost_profile_timings_warm.csv",
+        HERE / "batch_cost_profile_timings_warm_seed2.csv"]
 
     # Stamp the machine conditions. Timings taken on battery cannot be compared with
     # timings taken on AC -- the processor is clocked lower -- and a draining battery
@@ -78,12 +102,27 @@ def main(argv: Sequence[str] | None = None) -> None:
         print("  NOTE: on battery. Results here are internally comparable, and comparable with "
               "other runs made on battery, but not with runs made on AC power.")
 
-    cold_b, cold_g = fitted_coefficients([HERE / "batch_cost_profile_timings_allg.csv",
-                                          HERE / "batch_cost_profile_timings_allg_seed2.csv"])
-    warm_b, warm_g = fitted_coefficients([HERE / "batch_cost_profile_timings_warm.csv",
-                                          HERE / "batch_cost_profile_timings_warm_seed2.csv"])
+    # The coefficients must come from cost data measured under the SAME machine conditions as the
+    # run being scored. Batch and Gillespie do not slow by the same factor when conditions change --
+    # measured 1.365x versus 1.221x between a battery session and an AC one -- so T* itself shifts,
+    # and coefficients fitted elsewhere are miscalibrated.
+    cold_b, cold_g = fitted_coefficients([Path(p) for p in args.cold_timings])
+    warm_b, warm_g = fitted_coefficients([Path(p) for p in args.warm_timings])
+    # The adaptive policy as shipped is a poor stand-in for "optimal": with override_factor = 4 it
+    # follows the OLD PROXY RULE unless measurement shows the alternative is more than 4x cheaper,
+    # so whenever the better engine is only 1.5-3x better it never switches. Racing several
+    # override factors finds the best measurement-based policy actually available, which is the
+    # reference the deterministic rules deserve to be judged against. Factor 1.0 is genuinely
+    # greedy: pick whichever mode measures cheaper.
     contenders = [Contender("timing", HEURISTIC_WALLCLOCK)]
-    contenders += [Contender(f"T={c:g}", HEURISTIC_PROSPECTIVE, threshold=c) for c in CONSTANTS]
+    contenders += [Contender(f"timing_ovr{f:g}", HEURISTIC_WALLCLOCK, override_factor=f)
+                   for f in (float(x) for x in args.override_factors.split(",") if x.strip())]
+    if args.eager_probe:
+        contenders.append(Contender("timing_ovr1_eager", HEURISTIC_WALLCLOCK, override_factor=1.0,
+                                    probe_interval=64, probe_interval_committed=512))
+    chosen = ([float(x) for x in args.constants.split(",") if x.strip()]
+              if args.constants else list(CONSTANTS))
+    contenders += [Contender(f"T={c:g}", HEURISTIC_PROSPECTIVE, threshold=c) for c in chosen]
     contenders += [
         Contender("cost_model_cold", HEURISTIC_COST_MODEL, batch_coefficients=cold_b,
                   gillespie_coefficients=cold_g, scale=0.368),
@@ -134,7 +173,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                                                         + contenders[:rotation]).index(c), **r})
                     signatures[c.name][scenario.slug].add(
                         (r["batch_calls"], r["gillespie_calls"], r["mode_switches"]))
-                    if not r["timed_out"]:
+                    if not r["timed_out"] and not r.get("panicked"):
                         raw[c.name][scenario.slug][seed].append(r["elapsed_seconds"])
         for c in contenders:
             for seed in seeds:
@@ -148,6 +187,15 @@ def main(argv: Sequence[str] | None = None) -> None:
         w.writeheader()
         w.writerows(rows)
     print(f"\nwrote {args.output}\n")
+    panics = [r for r in rows if r.get("panicked")]
+    if panics:
+        # A simulator panic is a defect in batss, not a measurement artifact, so surface it
+        # loudly rather than letting it vanish into a lower sample count.
+        print(f"=== {len(panics)} runs PANICKED in the simulator and were excluded ===")
+        for scen in dict.fromkeys(r["scenario"] for r in panics):
+            hit = [r for r in panics if r["scenario"] == scen]
+            print(f"  {scen}: {len(hit)} runs; {hit[0]['error'][:150]}")
+        print()
 
     # Which scenarios can distinguish the constants at all? Compare the *sets* of mode signatures
     # each constant produced: if every constant produced the same set, they all executed the same

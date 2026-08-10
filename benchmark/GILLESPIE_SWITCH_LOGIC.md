@@ -1330,6 +1330,169 @@ bought, and it is bought at no measured cost in speed.
 > lose by about 10% on natural ones. Which number is "the" answer depends entirely on the scenario
 > mix, and neither mix is a random sample of real use. Quote the split, not the aggregate.
 
+## Report: the deterministic switching rule, measured against the best we can build (2026-08-10)
+
+All numbers here were collected on **AC power** with the cost model refit on AC-measured costs.
+Timings from earlier sessions were taken on battery and are not comparable; batch and Gillespie do
+not slow by the same factor when conditions change (measured 1.365x versus 1.221x), so `T*` itself
+moves about 12%.
+
+### What the simulator is deciding
+
+At every iteration `run()` chooses between two engines:
+
+* **batch** -- one expensive call (~10-50 us) that resolves a clump of about `E[L]` *reaction
+  attempts* at once, many of which are passive and produce nothing.
+* **Gillespie** -- one exact reaction at a time, cheap per reaction (~20-100 ns), delegated to rebop.
+
+So the decision is a bulk-buy: batching is worth it only when enough of the clump turns into real
+reactions.
+
+### The three quantities
+
+**`score(x)`** -- the existing prospective estimate of how many *real* reactions the next batch would
+deliver, computed in Rust at the live configuration, at the K the next batch would actually use:
+
+```text
+k = k_reset_target();  N = n + k
+E[L]  = sqrt(pi / (2 o (o+g))) sqrt(N)                 expected collision-free batch length
+score = (p_real / (kmax(k) C(N,o))) E[L]               = P(a draw is a real reaction) x E[L]
+```
+
+**`T*`** -- the *measured* break-even: `C_batch / C_Gillespie-per-reaction`. It reads as "how many
+Gillespie reactions this one batch costs the same as", so batching pays exactly when
+`score > T*`. Measured across the profile matrix on AC it spans **176 to 1114, a 6.3x range**. That
+range is the whole problem: no single constant can be right across it.
+
+**`T_hat(x)`** -- the model's prediction of `T*`, computed from the live state. The rule is
+`batch if score >= T_hat`, and `HEURISTIC_COST_MODEL` (selector 3) evaluates it every iteration.
+
+### The model that is fitted
+
+`C_batch` and `C_Gillespie` are fitted **separately**, each against its own directly measured target,
+and divided only afterwards. Fitting `T*` directly does not work -- it is a quotient, and regressing
+it as a sum gave coefficients whose signs flipped between datasets. Every coefficient is constrained
+**nonnegative**, because each term is an amount of real work and none can take negative time. The
+fit minimises *relative* error, so a 45 us case does not drown out a 12 us one.
+
+`C_batch`, microseconds per batch call (AC, warm-measured), R^2 = 0.933, median relative error 3.7%:
+
+| term | coefficient | what it counts |
+|---|---:|---|
+| `o` | 1.6954 | order-dependent fixed work |
+| `o log2(N)` | 0.044486 | collision-search iterations, weighted by order |
+| `[g >= 1]` | 3.3725 | the generative jump: extra high-precision gamma terms |
+| `g` | 0.39704 | magnitude of generativity, not just its presence |
+| `g log2(N)` | 0.033379 | generative work per search iteration |
+| `sum_{d=1..o} q^d` | 0.062209 | dense recursive sampling nodes |
+| `score` | 0.0012967 | occupied-lane work |
+| `B` | 0.33955 | channel alternatives |
+
+`C_Gillespie`, microseconds per exact reaction, R^2 = 0.979, median relative error 3.1%:
+
+| term | coefficient | what it counts |
+|---|---:|---|
+| `1` | 0.017392 | fixed per-reaction cost |
+| `B (q-2)` | 0.00065225 | dense rate evaluation across real species |
+| `B o` | 0.00070836 | per-channel reactant work |
+
+Note the batch intercept is **absent**: fitted on warm costs it goes to zero, having previously been
+the largest coefficient. It was measuring cold-start overhead, not real work.
+
+Prediction quality: correlation with measured `T*` is **0.968**, and leave-one-CRN-family-out regret
+is 1.000/1.000 on the frozen states.
+
+### How it performs end to end
+
+Wall-clock seconds for one `BatchSimulator.run` to reach `t_max`, 43 scenarios, 8 seeds x 2 repeats,
+paired per seed, execution order rotated. **Regret is against the best policy achieved on that same
+scenario and seed**, so 1.000 would mean always being the best available choice. Restricted to the
+38 scenarios whose mode signatures show the constants actually executing different runs:
+
+| policy | equal-family regret | worst scenario | vs shipped adaptive |
+|---|---:|---:|---:|
+| `timing` (shipped, override 4.0) | 1.283x | 2.304x | 1.000x |
+| `timing` override 1.0 (greedy) | 1.210x | 1.696x | 0.980x |
+| `timing` override 2.0 | 1.209x | 1.748x | 0.972x |
+| `timing` override 1.0 + eager probing | 1.218x | 1.825x | 0.981x |
+| `T = 100` | 1.363x | 1.941x | 0.994x |
+| `T = 250` | 1.193x | **1.407x** | 0.876x |
+| `T = 400` | 1.150x | 1.616x | 0.901x |
+| `cost_model_cold` (x0.368) | 1.191x | 1.571x | 0.882x |
+| **`cost_model_warm` (no correction)** | **1.112x** | **1.331x** | **0.855x** |
+
+**The cost model wins outright**: best regret, best worst case, and fastest against the incumbent --
+and it does so at scale 1.0, with no fitted correction, because the cold-measurement artifact that
+required one has been removed.
+
+### Why the adaptive policy underperforms
+
+Its decision is, in full:
+
+```rust
+let override_proxy =
+    self.switch.wdt(non_proxy) * WDT_OVERRIDE_FACTOR < self.switch.wdt(proxy_gillespie);
+self.set_mode(if override_proxy { non_proxy } else { proxy_gillespie });
+```
+
+with `WDT_OVERRIDE_FACTOR = 4.0`. **It is not a "measure both engines and pick the cheaper one"
+policy.** It runs whatever the *old proxy rule* chooses -- the rule this issue exists to replace --
+and overrides only when measurement shows the alternative more than **4x** cheaper. When the better
+engine is 1.5-3x better, which is the common case, the gate never opens.
+
+The evidence matches exactly. Every scenario where it loses worst is an `_r05` case, placed at half
+its break-even and therefore Gillespie-favoured, and it sits in batch mode nearly throughout:
+
+| scenario | timing/best | switches | batch calls | Gillespie calls | best policy |
+|---|---:|---:|---:|---:|---|
+| `shrinking_r05` | 2.056x | 3 | 2,164 | 10 | `T = 400` |
+| `shrinking_b_decay_channels_8_r05` | 2.007x | 2 | 1,348 | 6 | `T = 600` |
+| `shrinking_split_b_decay_r05` | 1.955x | 4 | 1,983 | 15 | `T = 600` |
+
+And `corr(log(1 + mode_switches), log(timing/best)) = -0.366`: it loses where it switches **least**.
+It is stuck, not thrashing.
+
+Setting the override factor to 1.0 confirms the diagnosis and quantifies it: regret improves from
+1.283x to 1.210x and the worst case from 2.304x to 1.696x. So the gate really is the defect. But
+even fully greedy the adaptive policy remains **worse than a plain constant** (1.210x versus 1.193x
+for `T = 250`) and clearly worse than the model (1.112x). Eager probing does not help (1.218x), so
+stale estimates are not the limiter either.
+
+Two structural reasons it cannot catch up, both unfixable by tuning: it must *pay* for the
+information, since every probe runs the mode it suspects is worse; and it learns only after being
+wrong, whereas the model knows the answer before the first call from CRN structure alone.
+
+### Should a fixed constant be used instead?
+
+The case against, on paired data. `T = 250` is the best constant overall, but its quality depends
+entirely on which CRN it meets:
+
+| policy | `shrinking_n2e6` | `dense_support_q12_r2` |
+|---|---:|---:|
+| `T = 100` | 0.924x (6/8 seeds) | **0.975x** (6/8) |
+| `T = 250` | **0.799x** (8/8) | 1.210x (0/8) |
+| `T = 500` | 0.855x (7/8) | **1.776x** (0/8) |
+| `cost_model_warm` | **0.763x** (7/8) | 1.146x (1/8) |
+
+`T = 250` wins 8/8 on one CRN and loses 0/8 on the other; `T = 500` is 1.776x on `dense_support`.
+The optimal constant **inverts** between two CRNs in the same suite, which is what a 6.3x spread in
+`T*` implies. A constant must be wrong somewhere; the model need not be, and measurably is not --
+worst case 1.331x against 1.407x for the best constant, while also being better on average.
+
+The honest caveat: on any *single* CRN a constant tuned for that CRN beats the model. The model's
+claim is that it is near-best everywhere without being told which CRN it is running.
+
+### What this costs and what it needs
+
+Per decision: one `log2`, a handful of multiplies, no allocation -- negligible beside the
+`calculate_total_propensity` already running every iteration. The Rust implementation reproduces the
+Python fit to 3.2e-16.
+
+The real cost is **calibration**: the coefficients are machine- and build-specific, and `T*` moved
+12% merely between battery and AC on one laptop. The functional form transfers; the numbers do not.
+Shipping this means either a calibration step or accepting per-machine error, and how much accuracy
+is lost by shipping one fixed coefficient vector has not been measured.
+
 ## What to run next, and how (2026-08-06)
 
 Two methodological problems were found after the results above were collected. Both are fixed in the

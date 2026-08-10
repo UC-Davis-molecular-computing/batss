@@ -62,6 +62,14 @@ class Contender:
     batch_coefficients: tuple[float, ...] | None = None
     gillespie_coefficients: tuple[float, ...] | None = None
     scale: float = 1.0
+    # Tuning for the adaptive wall-clock policy. Left as None the simulator keeps its shipped
+    # defaults; the important one is override_factor, whose default of 4.0 means the policy follows
+    # the old proxy rule unless the alternative measures more than 4x cheaper -- so it is not a
+    # "pick the cheaper engine" policy at all, and is a poor stand-in for optimal until tuned.
+    override_factor: float | None = None
+    probe_interval: int | None = None
+    probe_interval_committed: int | None = None
+    ema_alpha: float | None = None
 
 
 def fitted_coefficients(paths: Sequence[Path]) -> tuple[tuple[float, ...], tuple[float, ...]]:
@@ -73,6 +81,32 @@ def fitted_coefficients(paths: Sequence[Path]) -> tuple[tuple[float, ...], tuple
 
 
 def run_once(scenario: Scenario, contender: Contender, seed: int, cap: float) -> dict[str, Any]:
+    """Time one full run under one policy.
+
+    A run can also *panic*: the collision sampler carries a precision assertion that fires at large
+    populations (observed at n = 23,394,833 on Lotka-Volterra, with a claimed error of 6.1e-7). That
+    is a simulator bug rather than a harness one, but a panic reaching Python as a
+    ``PanicException`` would otherwise abort a multi-hour sweep at whatever scenario happened to
+    trigger it, losing every later measurement. Record it as a failed run and carry on, so the
+    failure is visible in the output instead of destroying it.
+    """
+
+    try:
+        return _run_once_inner(scenario, contender, seed, cap)
+    except BaseException as exc:  # PanicException does not derive from Exception
+        if type(exc).__name__ not in ("PanicException", "RuntimeError"):
+            raise
+        return {
+            "scenario": scenario.slug, "family": scenario.family, "policy": contender.name,
+            "seed": seed, "initial_n": scenario.case.initial_n,
+            "elapsed_seconds": math.nan, "completed": False, "timed_out": False,
+            "panicked": True, "error": " ".join(str(exc).split())[:400],
+            "batch_calls": 0, "gillespie_calls": 0, "mode_switches": 0,
+        }
+
+
+def _run_once_inner(scenario: Scenario, contender: Contender, seed: int,
+                    cap: float) -> dict[str, Any]:
     sim = _make_sim(scenario, seed)
     rust = sim.simulator
     rust.heuristic_gillespie_switching = contender.selector
@@ -82,6 +116,16 @@ def run_once(scenario: Scenario, contender: Contender, seed: int, cap: float) ->
         rust.cost_model_batch_coefficients = list(contender.batch_coefficients)
         rust.cost_model_gillespie_coefficients = list(contender.gillespie_coefficients)
         rust.cost_model_scale = contender.scale
+    # Set these on the simulator, not on `rust.switch`: that property hands back a snapshot, so
+    # assigning to its fields would be silently discarded and the policy would run untuned.
+    if contender.override_factor is not None:
+        rust.wdt_override_factor = contender.override_factor
+    if contender.probe_interval is not None:
+        rust.wdt_probe_interval = contender.probe_interval
+    if contender.probe_interval_committed is not None:
+        rust.wdt_probe_interval_committed = contender.probe_interval_committed
+    if contender.ema_alpha is not None:
+        rust.wdt_ema_alpha = contender.ema_alpha
     start = time.perf_counter_ns()
     rust.run(scenario.case.end_time, cap)
     elapsed = (time.perf_counter_ns() - start) / 1e9
@@ -92,6 +136,7 @@ def run_once(scenario: Scenario, contender: Contender, seed: int, cap: float) ->
         "seed": seed, "initial_n": scenario.case.initial_n,
         "elapsed_seconds": elapsed, "completed": completed,
         "timed_out": (not completed) and elapsed >= 0.9 * cap,
+        "panicked": False, "error": "",
         "batch_calls": int(switch.batch_calls), "gillespie_calls": int(switch.gillespie_calls),
         "mode_switches": int(switch.mode_switches),
     }

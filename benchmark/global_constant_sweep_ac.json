@@ -1,0 +1,174 @@
+{
+  "seeds": [
+    1301,
+    1302,
+    1303,
+    1304,
+    1305,
+    1306
+  ],
+  "repeats": 2,
+  "constants": [
+    60.0,
+    100.0,
+    150.0,
+    250.0,
+    400.0,
+    600.0,
+    1000.0
+  ],
+  "measurement_conditions": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 170 Stepping 4, GenuineIntel",
+    "power_source": "on_ac",
+    "battery_percent": 89,
+    "current_clock_mhz": 1400,
+    "max_clock_mhz": 1400,
+    "power_scheme": "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e  (Balanced)"
+  },
+  "all": {
+    "timing": {
+      "regret": 1.263905251205924,
+      "worst": 2.197962337910708,
+      "vs_timing": 1.0
+    },
+    "T=60": {
+      "regret": 1.348386244178285,
+      "worst": 2.538416891588383,
+      "vs_timing": 1.0815290251038678
+    },
+    "T=100": {
+      "regret": 1.2295210737701507,
+      "worst": 1.8914842542225885,
+      "vs_timing": 0.9681124681781768
+    },
+    "T=150": {
+      "regret": 1.1726574048637461,
+      "worst": 1.5552283764868013,
+      "vs_timing": 0.8926970090601493
+    },
+    "T=250": {
+      "regret": 1.13308788475848,
+      "worst": 1.3884585871604416,
+      "vs_timing": 0.8614118272424913
+    },
+    "T=400": {
+      "regret": 1.130729700375435,
+      "worst": 1.582052094810566,
+      "vs_timing": 0.901434367380512
+    },
+    "T=600": {
+      "regret": 1.187436137685573,
+      "worst": 2.004346010560119,
+      "vs_timing": 0.9467680843255004
+    },
+    "T=1000": {
+      "regret": 1.3068270359582899,
+      "worst": 2.244342752144635,
+      "vs_timing": 1.0331519843662367
+    },
+    "cost_model_cold": {
+      "regret": 1.1561591468497263,
+      "worst": 1.4766414615192895,
+      "vs_timing": 0.8734676500178615
+    },
+    "cost_model_warm": {
+      "regret": 1.1375776408881466,
+      "worst": 1.34490472481686,
+      "vs_timing": 0.8642441688613749
+    }
+  },
+  "discriminating": {
+    "timing": {
+      "regret": 1.2723727877177238,
+      "worst": 2.197962337910708,
+      "vs_timing": 1.0
+    },
+    "T=60": {
+      "regret": 1.3978486900228544,
+      "worst": 2.538416891588383,
+      "vs_timing": 1.0949298783896748
+    },
+    "T=100": {
+      "regret": 1.2422244264228655,
+      "worst": 1.8914842542225885,
+      "vs_timing": 0.9737169975565152
+    },
+    "T=150": {
+      "regret": 1.1675871204659183,
+      "worst": 1.5552283764868013,
+      "vs_timing": 0.8943419846375229
+    },
+    "T=250": {
+      "regret": 1.1128991561010162,
+      "worst": 1.3884585871604416,
+      "vs_timing": 0.8595750971574184
+    },
+    "T=400": {
+      "regret": 1.1347934114315608,
+      "worst": 1.582052094810566,
+      "vs_timing": 0.9042868930400871
+    },
+    "T=600": {
+      "regret": 1.1968836104784097,
+      "worst": 2.004346010560119,
+      "vs_timing": 0.9515345444778287
+    },
+    "T=1000": {
+      "regret": 1.3768686330270712,
+      "worst": 2.244342752144635,
+      "vs_timing": 1.0451699388377214
+    },
+    "cost_model_cold": {
+      "regret": 1.1290491292918543,
+      "worst": 1.4766414615192895,
+      "vs_timing": 0.8707237975824313
+    },
+    "cost_model_warm": {
+      "regret": 1.1178023166126647,
+      "worst": 1.34490472481686,
+      "vs_timing": 0.8609627151216437
+    }
+  },
+  "discriminating_scenarios": [
+    "dimerization_r05",
+    "dimerization_r1",
+    "lotka_volterra_r05",
+    "lotka_volterra_r1",
+    "shrinking_r05",
+    "shrinking_r1",
+    "shrinking_r2",
+    "shrinking_no_b_decay_r05",
+    "shrinking_no_b_decay_r1",
+    "shrinking_no_b_decay_r2",
+    "shrinking_split_b_decay_r05",
+    "shrinking_split_b_decay_r1",
+    "shrinking_split_b_decay_r2",
+    "shrinking_b_decay_channels_1_r05",
+    "shrinking_b_decay_channels_1_r1",
+    "shrinking_b_decay_channels_1_r2",
+    "shrinking_b_decay_channels_2_r05",
+    "shrinking_b_decay_channels_2_r1",
+    "shrinking_b_decay_channels_2_r2",
+    "shrinking_b_decay_channels_4_r05",
+    "shrinking_b_decay_channels_4_r1",
+    "shrinking_b_decay_channels_4_r2",
+    "shrinking_b_decay_channels_8_r05",
+    "shrinking_b_decay_channels_8_r1",
+    "shrinking_b_decay_channels_8_r2",
+    "dense_support_q4_r05",
+    "dense_support_q4_r1",
+    "dense_support_q6_r05",
+    "dense_support_q6_r1",
+    "dense_support_q8_r05",
+    "dense_support_q8_r1",
+    "dense_support_q8_r2",
+    "dense_support_q12_r05",
+    "dense_support_q12_r1",
+    "dense_support_q12_r2",
+    "collision_o2_g0_n1000000_r05",
+    "collision_o2_g0_n1000000_r1",
+    "collision_o2_g1_n1000000_r05",
+    "collision_o2_g2_n1000000_r05"
+  ]
+}
