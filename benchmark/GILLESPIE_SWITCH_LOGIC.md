@@ -1493,6 +1493,98 @@ The real cost is **calibration**: the coefficients are machine- and build-specif
 Shipping this means either a calibration step or accepting per-machine error, and how much accuracy
 is lost by shipping one fixed coefficient vector has not been measured.
 
+## Simulator panic: the collision sampler's precision guard (2026-08-10)
+
+A sweep died mid-run on a panic from the batching engine, not from any switching logic. It is
+recorded here because it aborted a multi-hour experiment and shapes how the harnesses are written,
+but it is a **simulator bug, independent of issue #14**. Filed as issue #15.
+
+Verbatim, from `global_constant_sweep.py` on scenario `lotka_volterra_r2`, seeds 1501-1512:
+
+```
+thread '<unnamed>' (34748) panicked at src\simulator_crn.rs:2412:13:
+lhs + ln(u) should always be less than rhs, except in the last iteration.
+lhs + ln(u) and rhs: "1646416784.15542727737136986040335493771664261664858935896305",
+                     "1646416784.1554272174835205078125".
+Potential error: 6.092965495782715e-7. Diff: "0.00000098670417765187809270428866485725619833724309".
+t_mid: 2. n = 23394833.
+This may indicate a floating point precision bug.
+```
+
+> [!NOTE]
+> The commit message of `1c2e705` cites `n = 23,394,809`. That is a transcription error; the
+> logged value is `23394833`, as above. `n` here is `self.n`, the **real** population -- not
+> `n_including_extra_species`.
+
+### Diagnosis
+
+`sample_collision_fast_f128` runs its binary search in f64 and escalates to f128 only when the
+comparison looks too close to call. The escalation guard is `simulator_crn.rs:2481`:
+
+```rust
+let potential_error = (last_lngamma_value * 2.5 * self.crn.o as f64) * f64::EPSILON;
+```
+
+`last_lngamma_value` is assigned in exactly one place -- line 2420, the **first** `ln_gamma` term,
+which seeds `rhs`. The loop at line 2424 then adds `o` more `ln_gamma` results of comparable
+magnitude to `rhs` without ever updating `last_lngamma_value`. So the bound is scaled by one term
+while the quantity actually compared has magnitude roughly `(o+1)` times larger, and floating-point
+error scales with the magnitude of the accumulated sum, not with one summand.
+
+The logged numbers confirm this exactly. Back out the implied term from the printed bound
+(`o = 2` for Lotka-Volterra):
+
+| quantity | value |
+| --- | --- |
+| implied `last_lngamma_value` | 5.488055e+08 |
+| magnitude actually compared (`lhs + ln u`) | 1.646417e+09 |
+| ratio | **3.0000** = `o + 1` |
+| actual discrepancy | 9.8670e-07 |
+| guard bound as written | 6.0930e-07 -- **does not fire** |
+| bound scaled by the compared magnitude | 1.8279e-06 -- **fires** |
+
+The ratio is 3.0000 to five significant figures. Had the bound been scaled by `lhs.abs().max(rhs.abs())`
+instead of `last_lngamma_value`, it would have escalated to f128 and the assertion would not have
+fired.
+
+This also explains the comment on line 2480 -- *"gonna throw in a 2.5 to be safer, as 1.5 still
+encountered the bug"* (`0dad502`, 2026-04-21). Enlarging the fudge factor is compensating for using
+the wrong magnitude, so it reduces the failure rate without removing the failure: `2.5` needed to be
+at least `3 x 1.62 ~ 4.9` for this particular sample. A correctly scaled bound needs no fudge factor
+of that kind.
+
+### Reproduction: not achieved
+
+The panic has **not** been reduced to a deterministic repro. What was tried, all without a hit:
+
+| attempt | coverage | result |
+| --- | --- | --- |
+| Forced batch (`proxy_threshold = 0`), Lotka-Volterra | 5 populations x 12 seeds = 60 runs | none |
+| Direct `sample_collision(r, u, ...)` sweep at padded N = 46.8M | 600k `(r, u)` pairs | none |
+| Direct sweep at N = 23,394,830 / 832 / 834 | 480k `(r, u)` pairs | none |
+| Mixed mode, thresholds 50-800, n = 11.6-12.0M | 96 runs | none |
+| Mixed mode, thresholds 0-1200, n = 23,394,809 / 23,394,833 | 96 runs | none |
+
+Two things make this hard, and both are worth knowing before trying again:
+
+1. **The scenario's population is not reproducible.** `lotka_volterra_r2` places `n` from a
+   *measured* break-even, which moves run to run, so re-running the sweep does not revisit the same
+   state.
+2. **It is a rare coincidence, not a state.** The assertion fires only when `lhs + ln u` lands
+   within ~1e-6 of `rhs` on the wrong side. At these magnitudes that is a narrow target in `u`,
+   so most trajectories through the same population never hit it.
+
+The productive route is almost certainly not a search over runs but a **direct unit test of the
+guard**: construct the `lhs`/`rhs` pair from the logged inputs and assert the escalation condition
+fires. That tests the fix rather than the coincidence.
+
+### What was done instead
+
+The harnesses catch `PanicException`, record the run as failed, exclude it from timings, and report
+it explicitly rather than silently shrinking the sample. **The sampler bug itself is not fixed** --
+nothing in this document's numbers depends on the fix, but a long unattended sweep can still lose a
+scenario to it.
+
 ## What to run next, and how (2026-08-06)
 
 Two methodological problems were found after the results above were collected. Both are fixed in the
