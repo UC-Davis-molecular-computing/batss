@@ -297,6 +297,94 @@ pub const COST_MODEL_GILLESPIE_FEATURES: usize = 6;
 /// uses, so a coefficient vector transfers without rescaling.
 const COST_MODEL_SYNC_HORIZON: f64 = 5000.0;
 
+/// Per-call ULP budget for the f64 `ln_gamma` results summed into `rhs` in the collision sampler,
+/// used to decide when the binary search must escalate to f128 (see `sample_collision_fast_f128`).
+///
+/// The error of one `ln_gamma` call is a few ULPs of *its own* value, so the escalation bound is
+/// this budget times `f64::EPSILON` times the summed magnitude of the f64-computed terms. The
+/// panic recorded in issue #15 measured 2.70 ULPs per call, and the previous value of 2.5 was
+/// therefore too small even before accounting for the terms it failed to count at all; 8 leaves
+/// roughly 3x margin over the largest error observed. Raising it costs a little performance (the
+/// search escalates to f128 slightly earlier) and buys correctness, so err high.
+const COLLISION_F64_ULP_BUDGET: f64 = 8.0;
+
+/// Regression tests for the escalation guard above. A child module so it can reach `collision_rhs`
+/// and `COLLISION_F64_ULP_BUDGET`, which are private to this module.
+#[cfg(test)]
+#[path = "collision_precision_tests.rs"]
+mod collision_precision_tests;
+
+/// The `t`-dependent side of the collision-time comparison in `sample_collision_fast_f128`, for a
+/// candidate batch size `t_mid`.
+///
+/// Returns `(rhs, f64_term_magnitude_sum)`. The second value is the summed magnitude of the terms
+/// that were evaluated in f64; it is `0.0` when `high_precision` is set, since then nothing is.
+/// `rhs` itself always accumulates in f128, so the summation contributes no error of its own --
+/// all the f64 error enters through the individual `ln_gamma` calls, each wrong by a few ULPs of
+/// its own value. That is why the caller's escalation bound is scaled by this sum: scaling it by
+/// any single term (as the code did before issue #15) under-counts by a factor of `1 + o/g`.
+///
+/// Extracted from the binary search so it can be tested directly; the search calls it once per
+/// iteration exactly as it previously ran this code inline.
+#[inline]
+fn collision_rhs(
+    n_including_extra_species: u64,
+    r: u64,
+    t_mid: u64,
+    o: usize,
+    g: usize,
+    ln_g: f128,
+    high_precision: bool,
+) -> (f128, f64) {
+    let mut f64_term_magnitude_sum: f64 = 0.0;
+    let mut rhs;
+    if high_precision {
+        rhs = ln_gamma_manual_high_precision((n_including_extra_species - r - (t_mid * o as u64)) as f128 + 1.0);
+    } else {
+        let term = ln_gamma((n_including_extra_species - r - (t_mid * o as u64)) as f64 + 1.0);
+        f64_term_magnitude_sum += term.abs();
+        rhs = term as f128;
+    }
+    if g > 0 {
+        for j in 0..o {
+            // Calculates b = ceil((n+g(t-1)-j)/g).
+            // See the comment where num_static_terms is defined for an explanation.
+            // This is the same thing, for the term log((n+g(t-1)-j)!(g)).
+            let num_dynamic_terms =
+                (((n_including_extra_species + (g as u64 * (t_mid - 1)) - j as u64) as f64) / g as f64).ceil() as u64;
+            rhs += (num_dynamic_terms as f128) * ln_g;
+            if high_precision {
+                rhs += ln_gamma_manual_high_precision(
+                    (n_including_extra_species + (g as u64 * t_mid) - j as u64) as f128 / g as f128,
+                );
+            } else {
+                let term = ln_gamma((n_including_extra_species + (g as u64 * t_mid) - j as u64) as f64 / g as f64);
+                f64_term_magnitude_sum += term.abs();
+                rhs += term as f128;
+            }
+
+            rhs -= ln_gamma_small_rational(
+                (n_including_extra_species as isize + (g as isize * (t_mid as isize - num_dynamic_terms as isize))
+                    - j as isize) as usize,
+                g,
+            );
+        }
+    } else {
+        // g = 0 case is much simpler; there's no multifactorial, as it's analogous
+        // to the population protocols case.
+        for j in 0..o {
+            if high_precision {
+                rhs += (t_mid as f128) * ln_f128((n_including_extra_species - j as u64) as f128);
+            } else {
+                let ln_term = ((n_including_extra_species - j as u64) as f64).ln();
+                f64_term_magnitude_sum += (t_mid as f64) * ln_term.abs();
+                rhs += (t_mid as f128) * ln_term as f128;
+            }
+        }
+    }
+    (rhs, f64_term_magnitude_sum)
+}
+
 /// All state for the batch/Gillespie mode-switching heuristic, grouped into one struct so the
 /// simulator doesn't carry a dozen more top-level fields. Holds the heuristic selector and its
 /// tuning, the measured-throughput EMAs, the probe schedule, and read-only observability counters.
@@ -2407,60 +2495,17 @@ impl BatchSimulator {
                 t_mid = (t_lo + t_hi) / 2;
             }
             // rhs tracks all of the terms that include t, i.e., those that we need to
-            // update each iteration of binary search.
-            let mut rhs;
-            // This tracks a value that we calculated from the faster (f64-based) lngamma,
-            // so we can check later if we need to switch to high-precision.
-            let mut last_lngamma_value: f64 = 0.0;
-            if use_high_precision_in_loop {
-                rhs = ln_gamma_manual_high_precision(
-                    (self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f128 + 1.0,
-                );
-            } else {
-                last_lngamma_value =
-                    ln_gamma((self.n_including_extra_species - r - (t_mid * self.crn.o as u64)) as f64 + 1.0);
-                rhs = last_lngamma_value as f128;
-            }
-            if self.crn.g > 0 {
-                for j in 0..self.crn.o {
-                    // Calculates b = ceil((n+g(t-1)-j)/g).
-                    // See the comment in the loop above where num_static_terms is defined for an explanation.
-                    // This is the same thing, for the term log((n+g(t-1)-j)!(g)).
-                    let num_dynamic_terms = (((self.n_including_extra_species + (self.crn.g as u64 * (t_mid - 1))
-                        - j as u64) as f64)
-                        / self.crn.g as f64)
-                        .ceil() as u64;
-                    rhs += (num_dynamic_terms as f128) * ln_g;
-                    if use_high_precision_in_loop {
-                        rhs += ln_gamma_manual_high_precision(
-                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid) - j as u64) as f128
-                                / self.crn.g as f128,
-                        );
-                    } else {
-                        rhs += ln_gamma(
-                            (self.n_including_extra_species + (self.crn.g as u64 * t_mid) - j as u64) as f64
-                                / self.crn.g as f64,
-                        ) as f128;
-                    }
-
-                    rhs -= ln_gamma_small_rational(
-                        (self.n_including_extra_species as isize
-                            + (self.crn.g as isize * (t_mid as isize - num_dynamic_terms as isize))
-                            - j as isize) as usize,
-                        self.crn.g,
-                    );
-                }
-            } else {
-                // g = 0 case is much simpler; there's no multifactorial, as it's analogous
-                // to the population protocols case.
-                for j in 0..self.crn.o {
-                    if use_high_precision_in_loop {
-                        rhs += (t_mid as f128) * ln_f128((self.n_including_extra_species - j as u64) as f128);
-                    } else {
-                        rhs += (t_mid as f128) * ((self.n_including_extra_species - j as u64) as f64).ln() as f128;
-                    }
-                }
-            }
+            // update each iteration of binary search. f64_term_magnitude_sum is the summed
+            // magnitude of the terms computed in f64, used below to bound their rounding error.
+            let (rhs, f64_term_magnitude_sum) = collision_rhs(
+                self.n_including_extra_species,
+                r,
+                t_mid,
+                self.crn.o,
+                self.crn.g,
+                ln_g,
+                use_high_precision_in_loop,
+            );
 
             // There's a nasty floating-point precision bug here. If u (the sampled 0-1 uniform
             // value) is equal to 1.0, then lhs and rhs will fundamentally contain the same terms
@@ -2475,11 +2520,23 @@ impl BatchSimulator {
             // If the calculation of whether rhs or lhs might depend on f128-level precision
             // for the ln_gamma calculation, we need to start using it (including in the iteration
             // we just tried to compute).
-            // There are self.crn.o calls to lngamma in each loop iteration, and each of them
-            // might be wrong by around the magnitude of the computed value times epsilon.
-            // Also gonna throw in a 2.5 to be safer, as 1.5 still encountered the bug.
-            let potential_error = (last_lngamma_value * 2.5 * self.crn.o as f64) * f64::EPSILON;
-            if !use_high_precision_in_loop && (lhs - rhs).abs() < potential_error as f128 {
+            // rhs is an f128 accumulator, so the summation itself is exact to ~1e-25 relative; the
+            // error is the o+1 independent f64 lngamma calls, each wrong by a few ULPs of its own
+            // value. So the bound is the summed magnitude of those terms times a per-call budget.
+            let potential_error = f64_term_magnitude_sum * COLLISION_F64_ULP_BUDGET * f64::EPSILON;
+            // Two different comparisons downstream can be flipped by this error, and they are not
+            // the same quantity, so both must be guarded (issue #15):
+            //   * `lhs < rhs` below, which steers the binary search: error matters when
+            //     |lhs - rhs| is small.
+            //   * the `lhs + ln_u <= rhs` assertion, which checks that P(l >= t_mid) >= 0 is still
+            //     resolvable: error matters when |lhs + ln_u - rhs| is small.
+            // These coincide only when ln_u is near 0. Guarding just the first is why the assertion
+            // could fire on nothing worse than rounding whenever P(l >= t_mid) was itself tiny --
+            // at t_mid <= 4 on a large population that probability is below the f64 noise floor.
+            if !use_high_precision_in_loop
+                && ((lhs - rhs).abs() < potential_error as f128
+                    || (lhs + ln_u - rhs).abs() < potential_error as f128)
+            {
                 use_high_precision_in_loop = true;
                 continue;
             }

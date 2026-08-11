@@ -1541,11 +1541,19 @@ Two consequences for the open questions:
    machine*. That variation is what a single constant cannot track, and it is unaffected by this
    correction.
 
-## Simulator panic: the collision sampler's precision guard (2026-08-10)
+## Simulator panic: the collision sampler's precision guard (2026-08-11)
 
 A sweep died mid-run on a panic from the batching engine, not from any switching logic. It is
-recorded here because it aborted a multi-hour experiment and shapes how the harnesses are written,
-but it is a **simulator bug, independent of issue #14**. Filed as issue #15.
+recorded here because it aborted a multi-hour experiment, but it is a **simulator bug, independent
+of issue #14**. Filed as issue #15. Fixed in `sample_collision_fast_f128`; regression tests in
+`src/collision_precision_tests.rs` (`cargo test --lib --release`).
+
+> [!CAUTION]
+> **This section was rewritten on 2026-08-11.** The first version, committed 2026-08-10, blamed the
+> panic on the escalation bound being scaled by one `ln_gamma` term instead of all of them, and
+> claimed "the logged numbers confirm this exactly". **That was wrong.** The mis-scaling is real but
+> did not cause this panic: at the state in question the measured f64 error is 2.384e-7, comfortably
+> *below* the old bound of 6.093e-7. The retracted claims are itemized at the end of this section.
 
 Verbatim, from `global_constant_sweep.py` on scenario `lotka_volterra_r2`, seeds 1501-1512:
 
@@ -1560,78 +1568,156 @@ This may indicate a floating point precision bug.
 ```
 
 > [!NOTE]
-> The commit message of `1c2e705` cites `n = 23,394,809`. That is a transcription error; the
-> logged value is `23394833`, as above. `n` here is `self.n`, the **real** population -- not
-> `n_including_extra_species`.
+> The `2412` in the panic is a line number from commit `97fa0ad`; on HEAD the assertion is at 2494
+> and the guard at 2481. Line numbers quoted below are HEAD's. Also, `n = 23394833` is `self.n`,
+> the **unpadded** population. The sampler works in `n_including_extra_species`, which is what the
+> arithmetic below is about — and confusing the two is why the first round of repro attempts
+> searched the wrong population entirely.
 
-### Diagnosis
+### Recovering the exact state
 
-`sample_collision_fast_f128` runs its binary search in f64 and escalates to f128 only when the
-comparison looks too close to call. The escalation guard is `simulator_crn.rs:2481`:
+The panic prints enough to reconstruct its own inputs. `potential_error = last_lngamma_value * 2.5 *
+o * f64::EPSILON`, so with `o = 2`:
 
-```rust
-let potential_error = (last_lngamma_value * 2.5 * self.crn.o as f64) * f64::EPSILON;
+```
+last_lngamma_value = 6.092965495782715e-7 / (2.5 * 2 * EPSILON) = 548805542.7277665
 ```
 
-`last_lngamma_value` is assigned in exactly one place -- line 2420, the **first** `ln_gamma` term,
-which seeds `rhs`. The loop at line 2424 then adds `o` more `ln_gamma` results of comparable
-magnitude to `rhs` without ever updating `last_lngamma_value`. So the bound is scaled by one term
-while the quantity actually compared has magnitude roughly `(o+1)` times larger, and floating-point
-error scales with the magnitude of the accumulated sum, not with one summand.
+That term is `ln_gamma(N - r - t_mid*o + 1)`, and `ln_gamma(33_606_712)` equals it exactly (checked
+against both Rust's `ln_gamma` and mpmath). With `r = 0` (the only value the engine ever passes) and
+`t_mid = 2`, this gives **`n_including_extra_species` = 33,606,715**.
 
-The logged numbers confirm this exactly. Back out the implied term from the printed bound
-(`o = 2` for Lotka-Volterra):
+Two independent checks confirm the reconstruction, both to full precision:
 
-| quantity | value |
-| --- | --- |
-| implied `last_lngamma_value` | 5.488055e+08 |
-| magnitude actually compared (`lhs + ln u`) | 1.646417e+09 |
-| ratio | **3.0000** = `o + 1` |
-| actual discrepancy | 9.8670e-07 |
-| guard bound as written | 6.0930e-07 -- **does not fire** |
-| bound scaled by the compared magnitude | 1.8279e-06 -- **fires** |
+| quantity | exact value (mpmath, 40 dps) | value printed by the panic | agreement |
+| --- | --- | --- | --- |
+| `rhs` | 1646416784.155427455907123 | 1646416784.1554272174835205078125 | differs by 2.384e-7 |
+| `lhs + ln u` | 1646416784.15542727737137 | 1646416784.15542727737136986… | all 25 digits |
 
-The ratio is 3.0000 to five significant figures. Had the bound been scaled by `lhs.abs().max(rhs.abs())`
-instead of `last_lngamma_value`, it would have escalated to f128 and the assertion would not have
-fired.
+The second row shows `lhs` is exact — it is computed entirely in f128 (`ln_gamma_manual_high_precision`,
+`ln_gamma_small_rational`, `ln_f128` at lines 2341-2373), so all the f64 error lives in `rhs`. The
+first row gives that error: **-2.384e-7**, which is precisely what
+`collision_rhs` still commits at this state today (measured by the regression test). The `Diff` field
+also pins the deviate: `Diff = |lhs - rhs| = δ + 5.99e-8 = 9.867e-7`, so `u = 1 - 9.267e-7`.
 
-This also explains the comment on line 2480 -- *"gonna throw in a 2.5 to be safer, as 1.5 still
-encountered the bug"* (`0dad502`, 2026-04-21). Enlarging the fudge factor is compensating for using
-the wrong magnitude, so it reduces the failure rate without removing the failure: `2.5` needed to be
-at least `3 x 1.62 ~ 4.9` for this particular sample. A correctly scaled bound needs no fudge factor
-of that kind.
+### Cause
 
-### Reproduction: not achieved
+**The guard and the assertion do not measure the same quantity.**
 
-The panic has **not** been reduced to a deterministic repro. What was tried, all without a hit:
+Because `lhs` has `ln_u` folded into it at line 2346, the two comparisons are:
 
-| attempt | coverage | result |
+| site | tests | value at this state |
 | --- | --- | --- |
-| Forced batch (`proxy_threshold = 0`), Lotka-Volterra | 5 populations x 12 seeds = 60 runs | none |
-| Direct `sample_collision(r, u, ...)` sweep at padded N = 46.8M | 600k `(r, u)` pairs | none |
-| Direct sweep at N = 23,394,830 / 832 / 834 | 480k `(r, u)` pairs | none |
-| Mixed mode, thresholds 50-800, n = 11.6-12.0M | 96 runs | none |
-| Mixed mode, thresholds 0-1200, n = 23,394,809 / 23,394,833 | 96 runs | none |
+| guard, line 2482 | `\|lhs - rhs\|` — is the binary-search step too close to call? | 9.867e-7 |
+| assertion, line 2494 | `lhs + ln_u <= rhs`, i.e. the sign of `-ln P(l >= t_mid)` | 1.785e-7 |
 
-Two things make this hard, and both are worth knowing before trying again:
+These coincide only when `ln_u` is near zero. Here the guard's quantity is large — 9.867e-7 against
+its 6.093e-7 bound — so it did not escalate. But the assertion's quantity, `-ln P(l >= 2)` =
+**1.785e-7**, is *smaller than the 2.384e-7 error in `rhs`*, so its sign is decided by rounding. The
+computed value came out at -5.99e-8, the assertion read that as `P(l >= 2) < 0`, and it panicked.
 
-1. **The scenario's population is not reproducible.** `lotka_volterra_r2` places `n` from a
-   *measured* break-even, which moves run to run, so re-running the sweep does not revisit the same
-   state.
-2. **It is a rare coincidence, not a state.** The assertion fires only when `lhs + ln u` lands
-   within ~1e-6 of `rhs` on the wrong side. At these magnitudes that is a narrow target in `u`,
-   so most trajectories through the same population never hit it.
+This is structural, not a coincidence of one population. `-ln P(l >= t)` at `N ~ 3.4e7` is 1.79e-7,
+5.36e-7, 1.07e-6, 1.79e-6 for `t = 2, 3, 4, 5`, against an error scale of ~2e-7 — so for `t_mid <= 4`
+the assertion is testing the sign of something it cannot resolve, however well the guard is scaled.
 
-The productive route is almost certainly not a search over runs but a **direct unit test of the
-guard**: construct the `lhs`/`rhs` pair from the logged inputs and assert the escalation condition
-fires. That tests the fix rather than the coincidence.
+### A second defect, real but latent
 
-### What was done instead
+Separately, the bound *was* scaled wrongly. `last_lngamma_value` was assigned only at line 2420 (the
+first `ln_gamma`, which seeds `rhs`); the loop at line 2424 then added `o` more `ln_gamma` results
+without updating it. Since `rhs` is an f128 accumulator the summation is exact, but each of those
+`o+1` f64 calls carries a few ULPs of *its own* value, so the bound must be scaled by their summed
+magnitude. That sum is `(1 + o/g)` times the first term — verified as exactly **3.0000** at
+`(o, g) = (2, 1)`, and the shortfall factor `(1 + o/g)/o` exceeds 1 only when `g = 1`.
 
-The harnesses catch `PanicException`, record the run as failed, exclude it from timings, and report
-it explicitly rather than silently shrinking the sample. **The sampler bug itself is not fixed** --
-nothing in this document's numbers depends on the fix, but a long unattended sweep can still lose a
-scenario to it.
+At `r = 0` this never bit: across a grid of six `(o, g)` shapes and seven populations, the worst
+`error / old_bound` was **0.484**. It becomes severe as `r` approaches `N`, where the first term
+tends to `ln_gamma(1) = 0` and the bound collapses — measured at 3.8e-13 against a 1.93e-7 error, a
+factor of 5e5. The engine never goes there (it always passes `r = 0`), and `sample_collision`'s
+`r > 0` path is separately broken for unrelated reasons (see below), so this is a hazard for the
+`r_i`/`u_i` lookup-table path the function's doc comment anticipates, not a live bug.
+
+### The fix
+
+Three changes at the guard, all in `sample_collision_fast_f128`:
+
+1. **Escalate on either quantity.** `|lhs - rhs| < bound || |lhs + ln_u - rhs| < bound`. This is what
+   actually addresses the panic: at the logged state the second term is 5.99e-8 against a 2.92e-6
+   bound, so the search escalates to f128 and the assertion is then evaluated exactly.
+2. **Scale the bound by the summed magnitude of the f64 terms.** The `rhs` computation was extracted
+   into `collision_rhs`, which returns that sum alongside `rhs`, so the sampler and the tests share
+   one implementation rather than the tests replicating the formula.
+3. **Raise the per-call budget from 2.5 to 8 ULP** (`COLLISION_F64_ULP_BUDGET`). This is margin, not
+   a demonstrated necessity — no case was found where 2.5 applied to the corrected magnitude was
+   insufficient. The worst measured `error / (magnitude_sum * EPSILON)` at `r = 0` is ~0.81, so 8
+   leaves roughly 10x headroom.
+
+### What it costs
+
+Escalating earlier means more f128 work, and escalation persists for the rest of a call. Measured
+back to back on AC, same session, `best of 3` for the microbenchmark and `median of 7` for the runs:
+
+| measurement | pre-fix | post-fix (budget 8) | post-fix (budget 4) |
+| --- | --- | --- | --- |
+| `sample_collision`, `u` spread over (0,1) | 11.98 us/call | 13.54 (+13%) | 13.25 (+11%) |
+| `sample_collision`, `u -> 1` tail | 24.83 us/call | 35.07 (+41%) | 34.53 (+39%) |
+| Dimerization batch run, n = 2e6 | 0.0832 s | 0.0788 s | 0.0700 s |
+| Lotka-Volterra batch run, n = 5e5 | 1.4350 s | 1.3000 s | 1.4482 s |
+
+Two things to read from this. The cost is almost entirely the **second guard clause**, not the
+widened budget: dropping the budget from 8 to 4 recovers only ~2%, so there is no point trading
+margin for speed here — 8 stays. And the **end-to-end runs show no regression at all** at these
+populations; the batch-run column is dominated by run-to-run variance (Lotka-Volterra's min ranged
+0.66-1.19 s across builds). The sampler is only part of batch cost, and escalation frequency grows
+with `N`, so a cost that is invisible at `n = 2e6` may not be at `n = 1e9`. That has not been
+measured, and matters for issue #14's cost model, whose `C_batch` coefficients were fitted pre-fix.
+
+### Reproduction: partial
+
+`src/collision_precision_tests.rs` reproduces the *arithmetic* deterministically and is the
+regression barrier: it reconstructs the logged state, reproduces the exact bound the panic printed,
+measures the f64 error `collision_rhs` commits, and asserts that `-ln P(l >= t)` for `t <= 4` really
+does fall below the f64 noise floor.
+
+**An end-to-end reproduction was not achieved, and one observation is unexplained.** The state is
+constructible — an already-uniform `(o, g) = (2, 1)` CRN with `k0_manual_multiplier` set to force
+`n_including_extra_species = 33,606,715` — and `sample_collision(0, u, false)` was swept over 300,000
+values of `u = 1 - δ` for `δ` in `[1e-11, 3e-6]`, including the `δ = 9.267e-7` the panic implies.
+On **pre-fix** code this produced no panic, even though tracing the binary search says `t_mid = 2`
+is evaluated there with a negative computed `-ln P`. The returned batch sizes are exactly right
+(boundaries at 1.785e-7, 5.356e-7, 1.071e-6, 1.785e-6 = the true `-ln P(l >= t)`), which means the
+search escalated to f128 at those steps. Why it escalates there and did not in the original run is
+not resolved.
+
+Earlier attempts, all at the wrong population and therefore uninformative: forced batch mode at five
+populations x 12 seeds; mixed mode at 11.6-12.0M and at 23.39M, 96 runs each; direct sampler sweeps
+totalling ~1.1M `(r, u)` pairs at padded `N` of 46.8M and 23.39M.
+
+### Unrelated problem found on the way
+
+`sample_collision` with `r > 0` panics with *"Binary search should never return t_lo = 0"* at
+essentially every `u` — 15,000/20,000 at `r = N/2`, and 20,000/20,000 for `r` within 100,000 of `N`.
+Counts are **identical before and after this fix**, so it is not a precision-guard problem. The
+engine never exercises it (`batch_step` passes `r = 0`), but it means the `r_i`/`u_i` path would not
+work today. Not filed; noted here.
+
+### Retracted claims from the 2026-08-10 version
+
+1. *"The logged numbers confirm this exactly"* and the table concluding the guard "does not fire"
+   because of mis-scaling. The measured error is 2.384e-7 and the old bound 6.093e-7; the bound was
+   adequate at that state. The ratio of 3.0000 confirms only the *magnitude structure* of `rhs`, and
+   says nothing about the size of the rounding error.
+2. *"Floating-point error scales with the magnitude of the accumulated sum, not with one summand."*
+   Wrong mechanism: `rhs` accumulates in f128, so the summation is exact to ~1e-25 relative. The
+   error is `o+1` independent f64 `ln_gamma` call errors, each scaled by its own term.
+3. *"`2.5` needed to be at least `3 x 1.62 ~ 4.9`."* Double-counted the magnitude ratio, which is
+   already inside the 1.62. The figure implied by the log is `2.5 x 1.62 = 4.05`.
+4. The suggested fix *"scale by `lhs.abs().max(rhs.abs())`"* is over-conservative for `g >= 2`, where
+   `rhs` contains large `num_dynamic_terms * ln_g` contributions that are computed in f128 and carry
+   no f64 error at all. The summed f64-term magnitude is the right scale.
+5. *"It is a rare coincidence, not a state"* and *"the productive route is almost certainly not a
+   search over runs"*. It is a state (`N`, through both the error and the ULP budget) times a tail in
+   `u`; a targeted search is reasonable, it simply has to be at the right `N` and in the top ~1e-6 of
+   the `u` range.
 
 ## What to run next, and how (2026-08-06)
 
