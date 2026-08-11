@@ -19,17 +19,23 @@ fn old_bound(n: u64, r: u64, t_mid: u64, o: usize) -> f64 {
 
 /// The escalation bound as the code computes it now: scaled by the summed magnitude of every
 /// f64-computed term, with a per-call budget of `COLLISION_F64_ULP_BUDGET`.
-fn new_bound(f64_term_magnitude_sum: f64) -> f64 {
-    f64_term_magnitude_sum * COLLISION_F64_ULP_BUDGET * f64::EPSILON
+fn new_bound(term_magnitude_sum: f64) -> f64 {
+    term_magnitude_sum * COLLISION_F64_ULP_BUDGET * f64::EPSILON
 }
 
 /// The error `collision_rhs` actually commits in f64, measured against its own f128 result,
 /// together with the magnitude sum it reports.
 fn measure(n: u64, r: u64, t_mid: u64, o: usize, g: usize) -> (f64, f64) {
     let ln_g = if g > 0 { ln_f128(g as f128) } else { f128::NAN };
-    let (rhs_f64, magnitude_sum) = collision_rhs(n, r, t_mid, o, g, ln_g, false);
-    let (rhs_hp, hp_sum) = collision_rhs(n, r, t_mid, o, g, ln_g, true);
-    assert_eq!(hp_sum, 0.0, "the high-precision path must report no f64 terms");
+    let (rhs_f64, magnitude_sum, _) = collision_rhs(n, r, t_mid, o, g, ln_g, false);
+    let (rhs_hp, hp_sum, _) = collision_rhs(n, r, t_mid, o, g, ln_g, true);
+    // Both paths sum the same terms, so their reported magnitudes must agree closely; the bound is
+    // only meaningful if the f128 path reports one too (it is what makes the loud
+    // out-of-precision check possible).
+    assert!(
+        (hp_sum - magnitude_sum).abs() <= 1e-6 * magnitude_sum.max(1.0),
+        "magnitude sums disagree between precisions: f64 {magnitude_sum:e} vs f128 {hp_sum:e}"
+    );
     let error = (rhs_f64 - rhs_hp).abs() as f64;
     (error, magnitude_sum)
 }
@@ -216,11 +222,11 @@ fn assertion_quantity_is_below_the_noise_floor_at_small_t() {
     let (n, o, g) = (33_606_715u64, 2usize, 1usize);
     let ln_g = ln_f128(g as f128);
     // -ln P(l >= t) computed exactly, via the high-precision path, relative to t = 1.
-    let (base, _) = collision_rhs(n, 0, 1, o, g, ln_g, true);
+    let (base, _, _) = collision_rhs(n, 0, 1, o, g, ln_g, true);
     let (_, magnitude_sum) = measure(n, 0, 2, o, g);
     let bound = new_bound(magnitude_sum);
     for t_mid in 2u64..=6 {
-        let (rhs_hp, _) = collision_rhs(n, 0, t_mid, o, g, ln_g, true);
+        let (rhs_hp, _, _) = collision_rhs(n, 0, t_mid, o, g, ln_g, true);
         let neg_ln_p = (base - rhs_hp).abs() as f64;
         if t_mid <= 4 {
             assert!(

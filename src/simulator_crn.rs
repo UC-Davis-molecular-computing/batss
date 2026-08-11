@@ -317,12 +317,12 @@ mod collision_precision_tests;
 /// The `t`-dependent side of the collision-time comparison in `sample_collision_fast_f128`, for a
 /// candidate batch size `t_mid`.
 ///
-/// Returns `(rhs, f64_term_magnitude_sum)`. The second value is the summed magnitude of the terms
-/// that were evaluated in f64; it is `0.0` when `high_precision` is set, since then nothing is.
-/// `rhs` itself always accumulates in f128, so the summation contributes no error of its own --
-/// all the f64 error enters through the individual `ln_gamma` calls, each wrong by a few ULPs of
-/// its own value. That is why the caller's escalation bound is scaled by this sum: scaling it by
-/// any single term (as the code did before issue #15) under-counts by a factor of `1 + o/g`.
+/// Returns `(rhs, term_magnitude_sum)`. The second value is the summed magnitude of the `lngamma`
+/// terms, in whichever precision they were evaluated -- the caller scales it by the matching
+/// epsilon to get an error bound. `rhs` itself always accumulates in f128, so the summation
+/// contributes no error of its own; all the error enters through the individual `ln_gamma` calls,
+/// each wrong by a few ULPs of *its own* value. That is why the escalation bound is scaled by this
+/// sum: scaling it by any single term (as the code did before issue #15) under-counts by `1 + o/g`.
 ///
 /// Extracted from the binary search so it can be tested directly; the search calls it once per
 /// iteration exactly as it previously ran this code inline.
@@ -335,16 +335,18 @@ fn collision_rhs(
     g: usize,
     ln_g: f128,
     high_precision: bool,
-) -> (f128, f64) {
-    let mut f64_term_magnitude_sum: f64 = 0.0;
+) -> (f128, f64, f64) {
+    let mut term_magnitude_sum: f64 = 0.0;
     let mut rhs;
     if high_precision {
         rhs = ln_gamma_manual_high_precision((n_including_extra_species - r - (t_mid * o as u64)) as f128 + 1.0);
+        term_magnitude_sum += (rhs as f64).abs();
     } else {
         let term = ln_gamma((n_including_extra_species - r - (t_mid * o as u64)) as f64 + 1.0);
-        f64_term_magnitude_sum += term.abs();
+        term_magnitude_sum += term.abs();
         rhs = term as f128;
     }
+    let first_term_magnitude = term_magnitude_sum;
     if g > 0 {
         for j in 0..o {
             // Calculates b = ceil((n+g(t-1)-j)/g).
@@ -354,12 +356,14 @@ fn collision_rhs(
                 (((n_including_extra_species + (g as u64 * (t_mid - 1)) - j as u64) as f64) / g as f64).ceil() as u64;
             rhs += (num_dynamic_terms as f128) * ln_g;
             if high_precision {
-                rhs += ln_gamma_manual_high_precision(
+                let term = ln_gamma_manual_high_precision(
                     (n_including_extra_species + (g as u64 * t_mid) - j as u64) as f128 / g as f128,
                 );
+                term_magnitude_sum += (term as f64).abs();
+                rhs += term;
             } else {
                 let term = ln_gamma((n_including_extra_species + (g as u64 * t_mid) - j as u64) as f64 / g as f64);
-                f64_term_magnitude_sum += term.abs();
+                term_magnitude_sum += term.abs();
                 rhs += term as f128;
             }
 
@@ -374,15 +378,17 @@ fn collision_rhs(
         // to the population protocols case.
         for j in 0..o {
             if high_precision {
-                rhs += (t_mid as f128) * ln_f128((n_including_extra_species - j as u64) as f128);
+                let term = (t_mid as f128) * ln_f128((n_including_extra_species - j as u64) as f128);
+                term_magnitude_sum += (term as f64).abs();
+                rhs += term;
             } else {
                 let ln_term = ((n_including_extra_species - j as u64) as f64).ln();
-                f64_term_magnitude_sum += (t_mid as f64) * ln_term.abs();
+                term_magnitude_sum += (t_mid as f64) * ln_term.abs();
                 rhs += (t_mid as f128) * ln_term as f128;
             }
         }
     }
-    (rhs, f64_term_magnitude_sum)
+    (rhs, term_magnitude_sum, first_term_magnitude)
 }
 
 /// All state for the batch/Gillespie mode-switching heuristic, grouped into one struct so the
@@ -693,6 +699,13 @@ pub struct BatchSimulator {
     #[pyo3(get, set)]
     pub k0_manual_multiplier: f64,
 
+    /// Experiment override for measuring the cost of the issue #15 precision fix: if true, the
+    /// collision sampler's escalation guard reverts to its pre-fix behaviour (bound scaled by the
+    /// first `ln_gamma` term with a 2.5 ULP budget, and only `|lhs - rhs|` guarded). Restores the
+    /// bug, so it is for A/B timing inside one process only -- never for production runs.
+    #[pyo3(get, set)]
+    pub collision_guard_legacy: bool,
+
     /// Number of K resets performed in run()'s batch branch (observability; used to compare policies).
     #[pyo3(get)]
     pub k_resets: u64,
@@ -855,6 +868,7 @@ impl BatchSimulator {
             python_module,
             crossover_k0,
             k0_manual_multiplier: 0.0,
+            collision_guard_legacy: false,
             k_resets: 0,
             gillespie_block_by_reactions: false,
             gillespie_reactions_executed: 0,
@@ -2495,9 +2509,9 @@ impl BatchSimulator {
                 t_mid = (t_lo + t_hi) / 2;
             }
             // rhs tracks all of the terms that include t, i.e., those that we need to
-            // update each iteration of binary search. f64_term_magnitude_sum is the summed
+            // update each iteration of binary search. term_magnitude_sum is the summed
             // magnitude of the terms computed in f64, used below to bound their rounding error.
-            let (rhs, f64_term_magnitude_sum) = collision_rhs(
+            let (rhs, term_magnitude_sum, first_term_magnitude) = collision_rhs(
                 self.n_including_extra_species,
                 r,
                 t_mid,
@@ -2520,10 +2534,16 @@ impl BatchSimulator {
             // If the calculation of whether rhs or lhs might depend on f128-level precision
             // for the ln_gamma calculation, we need to start using it (including in the iteration
             // we just tried to compute).
-            // rhs is an f128 accumulator, so the summation itself is exact to ~1e-25 relative; the
-            // error is the o+1 independent f64 lngamma calls, each wrong by a few ULPs of its own
-            // value. So the bound is the summed magnitude of those terms times a per-call budget.
-            let potential_error = f64_term_magnitude_sum * COLLISION_F64_ULP_BUDGET * f64::EPSILON;
+            // rhs is an f128 accumulator, so the summation itself is exact; the error is the o+1
+            // independent lngamma calls, each wrong by a few ULPs of its own value. So the bound is
+            // the summed magnitude of those terms times a per-call budget, scaled by whichever
+            // precision they were actually computed in.
+            let epsilon = if use_high_precision_in_loop {
+                f128::EPSILON as f64
+            } else {
+                f64::EPSILON
+            };
+            let potential_error = term_magnitude_sum * COLLISION_F64_ULP_BUDGET * epsilon;
             // Two different comparisons downstream can be flipped by this error, and they are not
             // the same quantity, so both must be guarded (issue #15):
             //   * `lhs < rhs` below, which steers the binary search: error matters when
@@ -2533,13 +2553,38 @@ impl BatchSimulator {
             // These coincide only when ln_u is near 0. Guarding just the first is why the assertion
             // could fire on nothing worse than rounding whenever P(l >= t_mid) was itself tiny --
             // at t_mid <= 4 on a large population that probability is below the f64 noise floor.
-            if !use_high_precision_in_loop
-                && ((lhs - rhs).abs() < potential_error as f128
-                    || (lhs + ln_u - rhs).abs() < potential_error as f128)
-            {
+            // Experiment path only: reproduce the pre-issue-15 guard so its cost can be measured
+            // A/B inside one process, without rebuilding (cross-build timings on this machine are
+            // not comparable -- run-to-run spread exceeds the effect).
+            let potential_error = if self.collision_guard_legacy {
+                first_term_magnitude * 2.5 * self.crn.o as f64 * f64::EPSILON
+            } else {
+                potential_error
+            };
+            let search_step_too_close = (lhs - rhs).abs() < potential_error as f128;
+            let assertion_too_close =
+                !self.collision_guard_legacy && (lhs + ln_u - rhs).abs() < potential_error as f128;
+            if !use_high_precision_in_loop && (search_step_too_close || assertion_too_close) {
                 use_high_precision_in_loop = true;
                 continue;
             }
+            // Already in f128 and still unable to resolve the step that steers the search. There is
+            // no higher precision to escalate to, so fail loudly instead of silently returning a
+            // batch size decided by rounding noise. At these magnitudes the f128 bound is ~1e-24,
+            // so this should be unreachable; if it ever fires, the sampler needs arbitrary
+            // precision (or `ln_gamma_manual_high_precision` silently fell back to f64, which it
+            // does for arguments <= 1000).
+            assert!(
+                self.collision_guard_legacy || !(use_high_precision_in_loop && search_step_too_close),
+                "collision sampler ran out of precision: |lhs - rhs| = {:?} is inside the f128 error
+                bound {:?} at t_mid = {:?}, n = {:?}, summed term magnitude {:?}.
+                The binary search cannot resolve this step even in f128.",
+                f128_to_decimal((lhs - rhs).abs()),
+                potential_error,
+                t_mid,
+                self.n,
+                term_magnitude_sum,
+            );
             // If lhs + ln_u <= rhs, this implies there's *no* value of u that could have changed
             // the outcome of this binary search step.
             // There's only one time this makes sense: if we're in the *last step* of the search,

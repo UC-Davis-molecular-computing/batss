@@ -1650,26 +1650,48 @@ Three changes at the guard, all in `sample_collision_fast_f128`:
    a demonstrated necessity — no case was found where 2.5 applied to the corrected magnitude was
    insufficient. The worst measured `error / (magnitude_sum * EPSILON)` at `r = 0` is ~0.81, so 8
    leaves roughly 10x headroom.
+4. **Fail loudly when f128 is not enough.** Previously, once the search escalated there was no
+   further check at all: `last_lngamma_value` was left at 0, so the bound became 0 and the code
+   proceeded on whatever `lhs < rhs` said — and if the assertion did fire it printed
+   `Potential error: 0.0`, which is meaningless. `collision_rhs` now reports its term magnitude in
+   both precisions, the bound is scaled by the epsilon of whichever is in use, and if the search
+   step is still unresolvable in f128 the sampler panics with a message saying so. At these
+   magnitudes the f128 bound is ~1e-24, so this should be unreachable; it is there to convert
+   "silently returns a batch size decided by rounding" into a stop. It also catches
+   `ln_gamma_manual_high_precision` silently falling back to f64, which it does for arguments <= 1000.
 
 ### What it costs
 
-Escalating earlier means more f128 work, and escalation persists for the rest of a call. Measured
-back to back on AC, same session, `best of 3` for the microbenchmark and `median of 7` for the runs:
+Escalating earlier means more f128 work, and escalation persists for the rest of a call, so this
+needed measuring.
 
-| measurement | pre-fix | post-fix (budget 8) | post-fix (budget 4) |
-| --- | --- | --- | --- |
-| `sample_collision`, `u` spread over (0,1) | 11.98 us/call | 13.54 (+13%) | 13.25 (+11%) |
-| `sample_collision`, `u -> 1` tail | 24.83 us/call | 35.07 (+41%) | 34.53 (+39%) |
-| Dimerization batch run, n = 2e6 | 0.0832 s | 0.0788 s | 0.0700 s |
-| Lotka-Volterra batch run, n = 5e5 | 1.4350 s | 1.3000 s | 1.4482 s |
+> [!WARNING]
+> **A first attempt at this measurement was wrong and is retracted.** It compared timings taken from
+> separate builds (stash, rebuild, measure, restore, rebuild, measure) and reported "+13% for spread
+> `u`, +41% in the tail". Repeating the *same* build four times then gave 9.4-13.5 us/call and
+> dimerization medians of 0.079-0.131 s — run-to-run spread larger than the effect being claimed.
+> This is the same cross-condition comparison error recorded twice already in this document.
 
-Two things to read from this. The cost is almost entirely the **second guard clause**, not the
-widened budget: dropping the budget from 8 to 4 recovers only ~2%, so there is no point trading
-margin for speed here — 8 stays. And the **end-to-end runs show no regression at all** at these
-populations; the batch-run column is dominated by run-to-run variance (Lotka-Volterra's min ranged
-0.66-1.19 s across builds). The sampler is only part of batch cost, and escalation frequency grows
-with `N`, so a cost that is invisible at `n = 2e6` may not be at `n = 1e9`. That has not been
-measured, and matters for issue #14's cost model, whose `C_batch` coefficients were fitted pre-fix.
+Both guards are now compiled into one binary and selected at runtime by `collision_guard_legacy`
+(`simulator_crn.rs`), so the comparison happens **inside one process, interleaved A/B/A/B**, with
+drift common-mode to both arms. 15 paired rounds; ratio is the median of per-round ratios, and the
+last column is a sign test over the 15 pairs:
+
+| measurement | legacy | fixed | ratio | fixed slower in |
+| --- | --- | --- | --- | --- |
+| `sample_collision`, `u` uniform in (0,1) | 10.35 us/call | 10.88 | **1.016** | 9/15 |
+| `sample_collision`, `u -> 1` tail | 20.76 us/call | 24.85 | **1.168** | **15/15** |
+| Dimerization batch run, n = 2e6 | 0.1317 s | 0.1339 | 1.046 | 10/15 |
+| Lotka-Volterra batch run, n = 5e5 | 1.2181 s | 1.2976 | 1.021 | 8/15 |
+
+The only unambiguous cost is in the `u -> 1` tail: **+17%, losing 15 out of 15 pairs**. That is where
+the second guard clause fires, and it is exactly the regime the fix exists to make safe. For
+uniformly distributed `u` the cost is ~1.6% and the sign test (9/15) does not distinguish it from
+noise — which is what matters in practice, since the tail is reached with probability ~1e-6 per
+batch. Neither end-to-end run shows a significant regression (10/15 and 8/15).
+
+Not measured: whether this holds at much larger `N`, where escalation is more frequent. It matters
+for issue #14's cost model, whose `C_batch` coefficients were fitted pre-fix.
 
 ### Reproduction: partial
 
