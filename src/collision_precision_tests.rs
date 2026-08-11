@@ -142,10 +142,11 @@ fn magnitude_sum_counts_every_f64_term() {
 /// zero while the remaining terms stay of order n ln n and keep their error.
 ///
 /// This is latent rather than live. The engine always calls with r = 0, and `sample_collision`'s
-/// r > 0 path is separately broken for reasons that have nothing to do with precision (it panics
-/// with "Binary search should never return t_lo = 0" at essentially every u, both before and after
-/// this fix). It matters for the r_i/u_i lookup-table path the function's doc comment anticipates:
-/// that path would call with r > 0, and would need a bound that does not collapse.
+/// r > 0 path is separately broken for reasons that have nothing to do with precision -- it asserts
+/// that a zero run length is impossible, when for r > 0 it is a legitimate outcome with probability
+/// `1 - (1 - r/N)^o` (issue #16, tests in `tests/batss_tests.py::TestCollisionSamplerNonzeroR`).
+/// If #16 is resolved by removing `r`, as proposed, this degenerate regime becomes unreachable and
+/// this test can go with it.
 #[test]
 fn guard_holds_when_r_approaches_n() {
     let n = 33_606_715u64;

@@ -1714,13 +1714,28 @@ Earlier attempts, all at the wrong population and therefore uninformative: force
 populations x 12 seeds; mixed mode at 11.6-12.0M and at 23.39M, 96 runs each; direct sampler sweeps
 totalling ~1.1M `(r, u)` pairs at padded `N` of 46.8M and 23.39M.
 
-### Unrelated problem found on the way
+### Unrelated problem found on the way (issue #16)
 
-`sample_collision` with `r > 0` panics with *"Binary search should never return t_lo = 0"* at
-essentially every `u` — 15,000/20,000 at `r = N/2`, and 20,000/20,000 for `r` within 100,000 of `N`.
-Counts are **identical before and after this fix**, so it is not a precision-guard problem. The
-engine never exercises it (`batch_step` passes `r = 0`), but it means the `r_i`/`u_i` path would not
-work today. Not filed; noted here.
+`sample_collision` with `r > 0` panics with *"Binary search should never return t_lo = 0"*, and the
+message blames floating point. It is not a precision problem at all: panic counts are **identical
+before and after this fix**, and the rate matches the closed form `1 - (1 - r/N)^o` to four decimals
+at both `o = 2` and `o = 3`, scale-invariantly from `n` = 1e3 to 1e6.
+
+| `r/N` | panic rate (`o = 2`) | `1 - (1 - r/N)^o` |
+| --- | --- | --- |
+| 0.10 | 0.1900 | 0.1900 |
+| 0.25 | 0.4375 | 0.4375 |
+| 0.50 | 0.7500 | 0.7500 |
+| 0.75 | 0.9375 | 0.9375 |
+
+That is exactly the probability the next `o`-tuple collides with one of the `r` already-drawn agents
+— i.e. a run length of **0**, which is a legitimate outcome once `r > 0`. The binary search finds
+the right answer and the assertion rejects it; the assertion is valid only for `r = 0`.
+
+`r` is left over from ppsim's multibatching, which batss does not use, and `batch_step` always
+passes 0. Filed as issue #16 with removal of `r` as the suggested fix — that would also remove the
+`r -> N` bound-collapse hazard above by construction. Characterization tests:
+`tests/batss_tests.py::TestCollisionSamplerNonzeroR`.
 
 ### Retracted claims from the 2026-08-10 version
 

@@ -389,5 +389,84 @@ def assertDeepAlmostEqual(test_case: unittest.TestCase, expected: Any, actual: A
         raise exc
 
 
+class TestCollisionSamplerNonzeroR(unittest.TestCase):
+    """Characterization tests for issue #16: ``sample_collision(r, u, ...)`` with ``r > 0``.
+
+    ``r`` is the number of agents already drawn in the current batch. The engine always passes
+    ``r = 0`` (``batch_step`` is the only caller); ``r > 0`` is left over from the multibatching
+    scheme inherited from ppsim, which batss does not use.
+
+    With ``r > 0`` a collision-free run length of **zero** is a legitimate outcome -- the very next
+    o-tuple can collide with the ``r`` already-drawn agents -- but the sampler asserts it can never
+    happen, so it panics instead of returning 0. These tests pin that behaviour, including evidence
+    that the binary search is computing the *right* answer and only the assertion is wrong.
+
+    **These tests describe a bug.** When issue #16 is fixed they must change: if ``r`` is removed,
+    delete this class; if ``r`` is kept, they should assert that 0 is returned rather than that a
+    panic is raised.
+    """
+
+    N_FOR_TESTS = 200_000
+
+    @staticmethod
+    def _uniform_sampler(n: int = N_FOR_TESTS) -> Any:
+        """A CRN that is already uniform at (o, g) = (2, 1), so no padding surprises."""
+        a, b = species('A B')
+        rxns = [
+            (2 * a >> 3 * a).k(1.0),
+            (a + b >> 2 * a + b).k(1.0),
+            (2 * b >> 2 * a + b).k(1.0),
+        ]
+        sim = Simulation({a: n // 2, b: n - n // 2}, rxns, volume=n)
+        return sim.simulator
+
+    def test_sample_collision_panics_for_nonzero_r(self) -> None:
+        """r > 0 panics with a message blaming floating point, though nothing here is imprecise."""
+        rust = self._uniform_sampler()
+        n_padded = int(rust.debug_prospective_n())
+        with self.assertRaises(BaseException) as ctx:
+            for i in range(1, 101):
+                rust.sample_collision(n_padded // 2, i / 101.0, False)
+        # pyo3 surfaces a Rust panic as pyo3_runtime.PanicException, which is not importable here.
+        self.assertEqual('PanicException', type(ctx.exception).__name__)
+        self.assertIn('Binary search should never return t_lo = 0', str(ctx.exception))
+
+    def test_sample_collision_never_panics_for_r_zero(self) -> None:
+        """The value the engine actually uses is unaffected: r = 0 is sound."""
+        rust = self._uniform_sampler()
+        for i in range(1, 1001):
+            length = rust.sample_collision(0, i / 1001.0, False)
+            self.assertGreaterEqual(length, 1)
+
+    def test_panic_rate_equals_immediate_collision_probability(self) -> None:
+        """The search is right; the assertion is wrong.
+
+        A run length of 0 means the next o-tuple collides with one of the r already-drawn agents,
+        which happens with probability ``1 - (1 - r/N)**o``. The panic rate matches that closed form
+        to three decimal places, so the binary search is landing on the correct answer and the
+        assertion is rejecting it. A genuine precision bug would not track this curve.
+        """
+        rust = self._uniform_sampler()
+        n_padded = int(rust.debug_prospective_n())
+        order = int(rust.debug_o())
+        trials = 2000  # u is swept on a regular grid, so the resolution here is 1/trials
+        for fraction in (0.1, 0.25, 0.5, 0.75):
+            r = int(n_padded * fraction)
+            panics = 0
+            for i in range(1, trials + 1):
+                try:
+                    rust.sample_collision(r, i / (trials + 1.0), False)
+                except BaseException:  # noqa: BLE001 - PanicException is not importable
+                    panics += 1
+            expected = 1.0 - (1.0 - r / n_padded) ** order
+            self.assertAlmostEqual(
+                panics / trials,
+                expected,
+                delta=2.0 / trials,
+                msg=f'at r/N={fraction}, panic rate {panics / trials} should equal the '
+                    f'immediate-collision probability {expected}',
+            )
+
+
 if __name__ == '__main__':
     unittest.main()
