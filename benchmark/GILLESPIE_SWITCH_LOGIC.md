@@ -1490,8 +1490,56 @@ Python fit to 3.2e-16.
 
 The real cost is **calibration**: the coefficients are machine- and build-specific, and `T*` moved
 12% merely between battery and AC on one laptop. The functional form transfers; the numbers do not.
-Shipping this means either a calibration step or accepting per-machine error, and how much accuracy
-is lost by shipping one fixed coefficient vector has not been measured.
+
+> [!IMPORTANT]
+> **Corrected 2026-08-10.** This section previously said shipping means "either a calibration step
+> or accepting per-machine error". That framing is wrong: **runtime calibration is not an available
+> option**, because it reintroduces exactly the nondeterminism issue #14 exists to remove. Only the
+> second branch is real. See below.
+
+### Why per-machine calibration is not an option
+
+The goal of issue #14 is that the switching decision be a function of the simulation state alone, so
+that a given seed produces a given trajectory. Calibration violates this at two levels:
+
+1. **Across machines.** Coefficients fitted on machine A differ from those fitted on machine B, so
+   the two machines switch at different points, consume the random stream differently, and produce
+   different trajectories from the same seed. Results stop being reproducible or comparable --
+   which is the property the whole exercise is trying to buy.
+2. **Within one machine.** Calibration is itself a *timing measurement*. Its output moves with
+   thermal state, power source, and background load -- the 12% battery/AC shift is exactly this.
+   So an auto-calibrating build is not even reproducible against itself between runs. That is the
+   wall-clock nondeterminism of `HEURISTIC_WALLCLOCK`, moved from the inner loop to startup.
+
+The distinction that matters is not "fixed vs. calibrated" but **whether the coefficients are part
+of the specification or measured at runtime**. Determinism is preserved if and only if they are part
+of the specification. So:
+
+- **Ship fixed default coefficients.** Compiled-in constants, versioned like any other constant.
+- **An explicit user override is fine** -- a coefficient vector passed in as configuration is still
+  part of the specification, reproducible by anyone given the same vector. What is not fine is the
+  library measuring timings and choosing coefficients for itself.
+- **Auto-calibration is ruled out** at any point in the lifecycle, startup included.
+
+### What this changes
+
+A fixed shipped vector is still fully deterministic. What varies across machines is not the
+*trajectory* but only *how close to optimal the switch points are* -- a performance property, not a
+correctness or reproducibility one. That is an acceptable cost; auto-calibration is not.
+
+Two consequences for the open questions:
+
+1. **Measuring the loss from one fixed vector is now mandatory, not optional.** It was previously
+   framed as one of two branches. It is the only branch, so the size of that loss determines
+   whether the cost model is shippable at all. Still unmeasured. This is now the highest-priority
+   open question, ahead of the residual `alpha` and the `o = 3` gap.
+2. **It levels the comparison with a fixed constant `T`.** Both a fixed `T` and a fixed coefficient
+   vector are machine-independent constants; neither adapts to the machine. So the fixed-constant
+   question is not "constant vs. calibrated" but "does evaluating a formula over the *CRN and
+   state* beat a single number, when both are frozen at build time?" The cost model's advantage was
+   never machine-adaptivity -- it is that `T*` spans 176-1114 (6.3x) *across CRNs and states on one
+   machine*. That variation is what a single constant cannot track, and it is unaffected by this
+   correction.
 
 ## Simulator panic: the collision sampler's precision guard (2026-08-10)
 
@@ -1706,10 +1754,19 @@ the drift in `score` along the trajectory rather than reading it pointwise.
    own boundary.
 3. Implement `T_hat` as `HEURISTIC_COST_MODEL` in Rust. Both cost forms are cheap: no `f128`, no
    allocation, and every input (`N`, `q`, `o`, `g`, `B`, `score`) is already computed by the
-   prospective selector. The per-machine coefficients are the open design question — either
-   calibrate once at build time or ship a profiled default and re-fit on demand.
+   prospective selector. ~~The per-machine coefficients are the open design question — either
+   calibrate once at build time or ship a profiled default and re-fit on demand.~~ **Superseded**
+   (2026-08-10): re-fitting on demand is ruled out — it reintroduces the nondeterminism issue #14
+   exists to remove. Ship fixed compiled-in coefficients; allow an explicit user-supplied vector,
+   never an auto-measured one. See "Why per-machine calibration is not an option".
 4. Then run `switching_policy_comparison.py` end-to-end against the timing policy and fixed
    `T = 500` on held-out seeds. Frozen-state regret does not by itself justify changing the default.
+5. **Highest priority, and newly mandatory:** measure how much a *single* fixed coefficient vector
+   loses when applied to a machine other than the one it was fitted on. Because calibration is off
+   the table, this number decides whether the cost model is shippable at all. Fit on machine A,
+   evaluate decision regret and end-to-end wall-clock on machine B, against a vector fitted on B.
+   If the loss is small the model ships; if it is comparable to the model's advantage over a fixed
+   `T`, the extra complexity buys nothing.
 
 ## Where things live / how to test
 
