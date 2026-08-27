@@ -691,6 +691,7 @@ pub fn binomial_sample(n: u64, p: f64, mut rng: &mut SmallRng) -> u64 {
                 return out;
             }
         }
+        //TODO: Do we expect to reach this? If so why?
     }
     let binomial_distribution = rand_distr::Binomial::new(n as u64, p).unwrap();
     let sample = binomial_distribution.sample(&mut rng);
