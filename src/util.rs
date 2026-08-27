@@ -681,14 +681,13 @@ pub fn binomial_sample(n: u64, p: f64, mut rng: &mut SmallRng) -> u64 {
     // TODO: this is a terrible, terrible hack, to get around a bug in rand_distr::Binomial
     // that happens when called with the above n and p.
     let expected_failures = n as f64 * (1.0 - p);
-    if expected_failures < SMALL_EXPECTED_FAILURE_THRESHOLD && n > core::i32::MAX as u64 {
+    if expected_failures < SMALL_EXPECTED_FAILURE_THRESHOLD && n > i32::MAX as u64 {
         let mut out = n;
         while out > 0 {
             let val: f64 = rng.sample(StandardUniform);
             if val < expected_failures {
                 out -= 1;
             } else {
-                println!("{:?}, {:?}, {:?}", out, n, expected_failures);
                 return out;
             }
         }
